@@ -1,0 +1,171 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User account and profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Auth UID" },
+        "username": { "type": "string", "maxLength": 50, "pattern": "^[a-zA-Z0-9_.]+$" },
+        "displayName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 150 },
+        "avatar": { "type": "string" },
+        "coverPhoto": { "type": "string" },
+        "bio": { "type": "string", "maxLength": 300 },
+        "location": { "type": "string", "maxLength": 100 },
+        "website": { "type": "string", "maxLength": 150 },
+        "verified": { "type": "boolean" },
+        "role": { "type": "string", "enum": ["user", "creator", "admin"] },
+        "followersCount": { "type": "number" },
+        "followingCount": { "type": "number" },
+        "friendsCount": { "type": "number" },
+        "isPrivate": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "username", "displayName", "createdAt"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "Social feed post created by a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "authorUsername": { "type": "string", "maxLength": 50 },
+        "authorAvatar": { "type": "string" },
+        "content": { "type": "string", "maxLength": 5000 },
+        "mediaUrls": { "type": "array" },
+        "mediaType": { "type": "string", "enum": ["image", "video"] },
+        "locationName": { "type": "string", "maxLength": 150 },
+        "audience": { "type": "string", "enum": ["public", "friends", "close_friends", "only_me"] },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "repostsCount": { "type": "number" },
+        "tags": { "type": "array" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["authorId", "authorUsername", "createdAt"]
+    },
+    "Comment": {
+      "title": "Comment",
+      "description": "Comments on a post",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "postId": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "authorUsername": { "type": "string", "maxLength": 50 },
+        "authorAvatar": { "type": "string" },
+        "text": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["postId", "authorId", "text", "createdAt"]
+    },
+    "Story": {
+      "title": "Story",
+      "description": "24-hour temporary story",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "authorAvatar": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["image", "video", "text"] },
+        "textOverlay": { "type": "string", "maxLength": 200 },
+        "backgroundGradient": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" },
+        "viewsCount": { "type": "number" }
+      },
+      "required": ["authorId", "mediaType", "createdAt", "expiresAt"]
+    },
+    "Reel": {
+      "title": "Reel",
+      "description": "Vertical short video",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string", "maxLength": 100 },
+        "authorAvatar": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "thumbnailUrl": { "type": "string" },
+        "caption": { "type": "string", "maxLength": 1000 },
+        "audioTitle": { "type": "string", "maxLength": 100 },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["authorId", "videoUrl", "caption", "createdAt"]
+    },
+    "Message": {
+      "title": "Message",
+      "description": "Direct chat message",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string", "maxLength": 100 },
+        "senderAvatar": { "type": "string" },
+        "text": { "type": "string", "maxLength": 3000 },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["image", "video", "voice", "file"] },
+        "createdAt": { "type": "string" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["conversationId", "senderId", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "recipientId": { "type": "string" },
+        "actorId": { "type": "string" },
+        "actorName": { "type": "string" },
+        "actorAvatar": { "type": "string" },
+        "type": { "type": "string" },
+        "text": { "type": "string", "maxLength": 500 },
+        "targetId": { "type": "string" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["recipientId", "actorId", "type", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "User" },
+      "description": "User profiles"
+    },
+    "/posts/{postId}": {
+      "schema": { "$ref": "Post" },
+      "description": "Social feed posts"
+    },
+    "/posts/{postId}/comments/{commentId}": {
+      "schema": { "$ref": "Comment" },
+      "description": "Comments under posts"
+    },
+    "/stories/{storyId}": {
+      "schema": { "$ref": "Story" },
+      "description": "Stories"
+    },
+    "/reels/{reelId}": {
+      "schema": { "$ref": "Reel" },
+      "description": "Reels"
+    },
+    "/conversations/{convId}/messages/{messageId}": {
+      "schema": { "$ref": "Message" },
+      "description": "Direct conversation messages"
+    },
+    "/notifications/{notifId}": {
+      "schema": { "$ref": "Notification" },
+      "description": "User notifications"
+    }
+  }
+}

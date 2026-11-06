@@ -1,0 +1,96 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      allow read: if isSignedIn() && isValidId(userId);
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow update: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow delete: if isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Posts Collection
+    match /posts/{postId} {
+      allow read: if isSignedIn() && isValidId(postId);
+      allow create: if isSignedIn() && isValidId(postId) && incoming().authorId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(postId) && (
+        existing().authorId == request.auth.uid ||
+        incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'reactionCounts', 'commentsCount', 'repostsCount'])
+      );
+      allow delete: if isSignedIn() && existing().authorId == request.auth.uid;
+
+      // Comments Subcollection
+      match /comments/{commentId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && incoming().authorId == request.auth.uid;
+        allow update: if isSignedIn() && existing().authorId == request.auth.uid;
+        allow delete: if isSignedIn() && existing().authorId == request.auth.uid;
+      }
+    }
+
+    // Stories Collection
+    match /stories/{storyId} {
+      allow read: if isSignedIn() && isValidId(storyId);
+      allow create: if isSignedIn() && isValidId(storyId) && incoming().authorId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(storyId);
+      allow delete: if isSignedIn() && existing().authorId == request.auth.uid;
+    }
+
+    // Reels Collection
+    match /reels/{reelId} {
+      allow read: if isSignedIn() && isValidId(reelId);
+      allow create: if isSignedIn() && isValidId(reelId) && incoming().authorId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(reelId) && (
+        existing().authorId == request.auth.uid ||
+        incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'commentsCount', 'sharesCount', 'viewsCount'])
+      );
+      allow delete: if isSignedIn() && existing().authorId == request.auth.uid;
+    }
+
+    // Conversations & Messages
+    match /conversations/{convId} {
+      allow read, write: if isSignedIn() && isValidId(convId);
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn() && incoming().senderId == request.auth.uid;
+        allow update, delete: if isSignedIn() && existing().senderId == request.auth.uid;
+      }
+    }
+
+    // Notifications
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && (resource == null || resource.data.recipientId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && resource.data.recipientId == request.auth.uid;
+    }
+
+    // Reports (Safety & Moderation)
+    match /reports/{reportId} {
+      allow create: if isSignedIn() && isValidId(reportId);
+      allow read, update: if isSignedIn();
+    }
+  }
+}
