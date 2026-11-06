@@ -1746,22 +1746,42 @@ async function startServer() {
   const distPath = path.join(__dirname, 'dist');
   const publicPath = path.join(__dirname, 'public');
 
-  // Always serve static files from public/ (icons, logos, assetlinks)
+  const setPwaStaticHeaders = (res: express.Response, filePath: string) => {
+    if (filePath.endsWith('manifest.json') || filePath.endsWith('.webmanifest')) {
+      res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+      res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+    } else if (filePath.endsWith('sw.js') || filePath.endsWith('registerSW.js')) {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Service-Worker-Allowed', '/');
+    }
+  };
+
+  // Always serve static files from public/ (manifest.json, icons, logos, assetlinks)
   if (fs.existsSync(publicPath)) {
-    app.use(express.static(publicPath));
+    app.use(
+      express.static(publicPath, {
+        setHeaders: setPwaStaticHeaders,
+      })
+    );
   }
+
+  // Always serve compiled Service Worker files (/sw.js, /registerSW.js, /workbox-*.js) with proper JS MIME type
+  app.get(['/sw.js', '/registerSW.js', '/workbox-:hash.js'], (req, res, next) => {
+    const candidate = path.join(distPath, path.basename(req.path));
+    if (fs.existsSync(candidate)) {
+      res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Service-Worker-Allowed', '/');
+      return res.sendFile(candidate);
+    }
+    next();
+  });
 
   if (process.env.NODE_ENV === 'production' && fs.existsSync(distPath)) {
     app.use(
       express.static(distPath, {
-        setHeaders: (res, filePath) => {
-          if (filePath.endsWith('.webmanifest')) {
-            res.setHeader('Content-Type', 'application/manifest+json');
-          } else if (filePath.endsWith('sw.js') || filePath.endsWith('registerSW.js')) {
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Service-Worker-Allowed', '/');
-          }
-        },
+        setHeaders: setPwaStaticHeaders,
       })
     );
     app.get('*', (req, res, next) => {

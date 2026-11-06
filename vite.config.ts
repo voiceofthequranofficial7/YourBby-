@@ -23,17 +23,25 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon.svg'],
+        injectRegister: 'auto',
+        manifestFilename: 'manifest.json',
+        includeManifestIcons: false,
+        includeAssets: [],
         manifest: {
           id: '/',
-          name: 'YourBby — Global Social Network',
+          name: 'YourBby',
           short_name: 'YourBby',
-          description: 'YOUR WORLD. YOUR PEOPLE. Global social networking platform combining feed, stories, reels, messaging and creator tools.',
+          description: 'Your world. Your people. Global social networking platform combining feed, stories, reels, messaging, and communities.',
           theme_color: '#0f172a',
-          background_color: '#020617',
+          background_color: '#0f172a',
           display: 'standalone',
+          orientation: 'portrait',
           start_url: '/',
           scope: '/',
+          lang: 'en',
+          dir: 'ltr',
+          categories: ['social', 'communication'],
+          prefer_related_applications: false,
           icons: [
             {
               src: '/pwa-192x192.png',
@@ -48,6 +56,12 @@ export default defineConfig(() => {
               purpose: 'any',
             },
             {
+              src: '/pwa-maskable-192x192.png',
+              sizes: '192x192',
+              type: 'image/png',
+              purpose: 'maskable',
+            },
+            {
               src: '/pwa-maskable-512x512.png',
               sizes: '512x512',
               type: 'image/png',
@@ -57,9 +71,26 @@ export default defineConfig(() => {
         },
         workbox: {
           maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-          globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+          globIgnores: [
+            '**/node_modules/**/*',
+            'sw.js',
+            'workbox-*.js',
+            'src/**/*',
+            'manifest.json',
+            'manifest.webmanifest',
+          ],
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+          skipWaiting: true,
           navigateFallback: '/index.html',
-          navigateFallbackDenylist: [/^\/api\//],
+          navigateFallbackDenylist: [
+            /^\/api\//,
+            /^\/manifest\.json$/,
+            /^\/manifest\.webmanifest$/,
+            /^\/sw\.js$/,
+            /^\/registerSW\.js$/,
+          ],
           runtimeCaching: [
             {
               urlPattern: /^\/api\/.*/i,
@@ -70,6 +101,20 @@ export default defineConfig(() => {
                 expiration: {
                   maxEntries: 50,
                   maxAgeSeconds: 60 * 60 * 24 * 7,
+                },
+                cacheableResponse: {
+                  statuses: [0, 200],
+                },
+              },
+            },
+            {
+              urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp|ico)$/i,
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'yourbby-images-cache',
+                expiration: {
+                  maxEntries: 60,
+                  maxAgeSeconds: 60 * 60 * 24 * 30,
                 },
                 cacheableResponse: {
                   statuses: [0, 200],
@@ -97,6 +142,23 @@ export default defineConfig(() => {
           type: 'module',
         },
       }),
+      {
+        name: 'dedupe-pwa-manifest-link',
+        enforce: 'post',
+        transformIndexHtml: {
+          order: 'post',
+          handler(html) {
+            let seenManifest = false;
+            return html.replace(/<link\s+rel=["']manifest["'][^>]*>/gi, () => {
+              if (!seenManifest) {
+                seenManifest = true;
+                return '<link rel="manifest" href="/manifest.json" />';
+              }
+              return '';
+            });
+          },
+        },
+      },
     ],
     resolve: {
       alias: {

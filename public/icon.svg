@@ -1,36 +1,55 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#090d16"/>
-      <stop offset="50%" stop-color="#0f172a"/>
-      <stop offset="100%" stop-color="#1e1b4b"/>
+    <radialGradient id="bgGrad" cx="50%" cy="45%" r="65%">
+      <stop offset="0%" stop-color="#1e2436"/>
+      <stop offset="60%" stop-color="#141824"/>
+      <stop offset="100%" stop-color="#0b0e17"/>
+    </radialGradient>
+    <linearGradient id="infinityGrad1" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#fb7185"/>
+      <stop offset="45%" stop-color="#ec4899"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
     </linearGradient>
-    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="infinityGrad2" x1="0%" y1="20%" x2="100%" y2="80%">
       <stop offset="0%" stop-color="#f43f5e"/>
-      <stop offset="50%" stop-color="#ec4899"/>
+      <stop offset="50%" stop-color="#d946ef"/>
       <stop offset="100%" stop-color="#6366f1"/>
     </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="16" result="blur"/>
+    <filter id="neonGlow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
       <feComposite in="SourceGraphic" in2="blur" operator="over"/>
     </filter>
   </defs>
-  
-  <!-- Base Background -->
-  <rect width="512" height="512" rx="120" fill="url(#bgGrad)"/>
-  <rect width="504" height="504" x="4" y="4" rx="116" fill="none" stroke="url(#glowGrad)" stroke-width="4" stroke-opacity="0.4"/>
-  
-  <!-- Central Glowing Glyph -->
-  <g filter="url(#glow)">
-    <path d="M 160 170 L 220 280 L 220 370" fill="none" stroke="url(#glowGrad)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
-    <path d="M 280 170 L 220 280" fill="none" stroke="url(#glowGrad)" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"/>
-    
-    <!-- Connected 'b' letterform -->
-    <path d="M 290 180 L 290 370" fill="none" stroke="url(#glowGrad)" stroke-width="38" stroke-linecap="round"/>
-    <circle cx="340" cy="305" r="55" fill="none" stroke="url(#glowGrad)" stroke-width="38"/>
+
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+
+  <g filter="url(#neonGlow)" transform="translate(0, -18)">
+    <path
+      d="M 256 230 C 218 165, 118 165, 118 230 C 118 295, 218 295, 256 230 C 294 165, 394 165, 394 230 C 394 295, 294 295, 256 230 Z"
+      fill="none"
+      stroke="url(#infinityGrad1)"
+      stroke-width="26"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <path
+      d="M 256 230 C 224 180, 134 180, 134 230 C 134 280, 224 280, 256 230 C 288 180, 378 180, 378 230 C 378 280, 288 280, 256 230 Z"
+      fill="none"
+      stroke="url(#infinityGrad2)"
+      stroke-width="10"
+      stroke-opacity="0.85"
+      stroke-linecap="round"
+    />
   </g>
-  
-  <!-- Brand Sparkle Stars -->
-  <path d="M 380 140 Q 380 165 405 165 Q 380 165 380 190 Q 380 165 355 165 Q 380 165 380 140 Z" fill="#fb7185"/>
-  <circle cx="140" cy="140" r="12" fill="#818cf8"/>
+
+  <text
+    x="256"
+    y="366"
+    text-anchor="middle"
+    fill="#f5d0fe"
+    font-family="Plus Jakarta Sans, system-ui, -apple-system, sans-serif"
+    font-size="56"
+    font-weight="700"
+    letter-spacing="1"
+  >YourBby</text>
 </svg>
