@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useApp } from '../../context/AppContext.tsx';
+import { compressImageDataUrl, uploadCoverPhotoFile } from '../../firebase/config.ts';
 import {
   User,
   Camera,
@@ -42,8 +43,7 @@ export const OwnerProfileSetupModal: React.FC<OwnerProfileSetupModalProps> = ({
     'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="%230f172a"/><circle cx="100" cy="100" r="76" fill="%231e293b" stroke="%23f43f5e" stroke-width="4"/><text x="100" y="118" font-family="system-ui,sans-serif" font-size="64" font-weight="bold" fill="%23ffffff" text-anchor="middle">MS</text></svg>'
   );
   const [coverPreview, setCoverPreview] = useState<string>(
-    currentUser?.coverPhoto ||
-    'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80'
+    (currentUser?.coverPhotoURL !== undefined ? currentUser.coverPhotoURL : currentUser?.coverPhoto) || ''
   );
 
   const [isCheckingUsername, setIsCheckingUsername] = useState(false);
@@ -79,26 +79,29 @@ export const OwnerProfileSetupModal: React.FC<OwnerProfileSetupModalProps> = ({
     }
   };
 
-  const handleAvatarFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const res = event.target?.result as string;
-      if (res) setAvatarPreview(res);
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageDataUrl(file, 320, 320, 110000);
+      if (compressed) setAvatarPreview(compressed);
+    } catch (_) {}
   };
 
-  const handleCoverFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const res = event.target?.result as string;
-      if (res) setCoverPreview(res);
-    };
-    reader.readAsDataURL(file);
+    e.target.value = '';
+    if (!file || !currentUser) return;
+    setErrorMessage(null);
+    setIsSaving(true);
+    try {
+      const downloadUrl = await uploadCoverPhotoFile(file, currentUser.id, file.name);
+      setCoverPreview(downloadUrl);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to upload cover photo');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleCameraCapture = (mediaUrl: string) => {
@@ -131,6 +134,7 @@ export const OwnerProfileSetupModal: React.FC<OwnerProfileSetupModalProps> = ({
         website: website.trim(),
         privacy,
         avatar: avatarPreview,
+        coverPhotoURL: coverPreview,
         coverPhoto: coverPreview
       });
       onClose();
@@ -189,17 +193,18 @@ export const OwnerProfileSetupModal: React.FC<OwnerProfileSetupModalProps> = ({
               </label>
 
               {/* Cover Photo Box */}
-              <div className="relative h-32 sm:h-40 rounded-2xl overflow-hidden bg-slate-950 border border-slate-200 dark:border-slate-800 group">
-                <img src={coverPreview} alt="Cover Preview" className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => coverInputRef.current?.click()}
-                    className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold backdrop-blur-xs flex items-center gap-1.5"
-                  >
-                    <Upload className="w-3.5 h-3.5" /> Change Cover
-                  </button>
-                </div>
+              <div className="relative h-32 sm:h-40 rounded-2xl overflow-hidden bg-gradient-to-r from-slate-950 via-indigo-950 to-rose-950 border border-slate-200 dark:border-slate-800 group">
+                {coverPreview && (
+                  <img src={coverPreview} alt="Cover Preview" className="w-full h-full object-cover" />
+                )}
+                <button
+                  type="button"
+                  onClick={() => coverInputRef.current?.click()}
+                  className="absolute top-2.5 right-2.5 z-20 px-3 py-1.5 rounded-xl bg-slate-950/80 hover:bg-slate-950 text-white text-xs font-bold backdrop-blur-md border border-white/20 flex items-center gap-1.5 shadow-md"
+                >
+                  <Upload className="w-3.5 h-3.5 text-rose-400" />
+                  <span>Change Cover</span>
+                </button>
                 <input
                   ref={coverInputRef}
                   type="file"

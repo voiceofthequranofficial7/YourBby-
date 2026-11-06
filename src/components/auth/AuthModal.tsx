@@ -1,17 +1,11 @@
 import React, { useState } from 'react';
 import { useApp } from '../../context/AppContext.tsx';
-import { auth, googleProvider, db } from '../../firebase/config.ts';
-import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { auth, googleProvider } from '../../firebase/config.ts';
+import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import {
   X,
-  Lock,
-  Mail,
-  User as UserIcon,
-  Sparkles,
   Check,
   AlertCircle,
-  Users,
-  LogIn,
   UserPlus
 } from 'lucide-react';
 
@@ -21,13 +15,14 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { currentUser, updateCurrentUserProfile } = useApp();
-  const [mode, setMode] = useState<'login' | 'register' | 'switch'>('login');
+  const { currentUser, allUsers, switchUserAccount, registerUserAccount } = useApp();
+  const [mode, setMode] = useState<'login' | 'register' | 'switch'>('switch');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
+  const [bio, setBio] = useState('');
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -42,11 +37,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
       if (user) {
-        // Initialize or update user profile with neutral initials or Google photo
-        await updateCurrentUserProfile({
+        await registerUserAccount({
+          id: user.uid,
           displayName: user.displayName || 'YourBby User',
-          username: user.email?.split('@')[0] || `user_${Date.now()}`,
-          avatar: user.photoURL || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(user.displayName || 'YB')}`,
+          username: (user.email?.split('@')[0] || `user_${Date.now()}`).replace(/[^a-zA-Z0-9_]/g, ''),
+          avatar: user.photoURL || undefined,
         });
         onClose();
       }
@@ -58,7 +53,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Firebase Email/Password
+  // Registration & Email/Password Auth
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -77,26 +72,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           return;
         }
 
-        const cred = await createUserWithEmailAndPassword(auth, email, password);
-        await updateCurrentUserProfile({
+        let uid = `u_${Date.now()}`;
+        if (email.trim() && password.trim()) {
+          try {
+            const cred = await createUserWithEmailAndPassword(auth, email, password);
+            uid = cred.user.uid;
+          } catch (_) {
+            // Continue with local/server persistent registration if Firebase email auth is not enabled
+          }
+        }
+
+        await registerUserAccount({
+          id: uid,
           displayName: displayName.trim(),
-          username: username.trim().toLowerCase(),
-          avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(displayName.trim())}`,
+          username: username.trim().toLowerCase().replace(/^@/, ''),
+          bio: bio.trim() || 'YourBby Member 🌐',
         });
         onClose();
       } else {
         const cred = await signInWithEmailAndPassword(auth, email, password);
         if (cred.user) {
-          await updateCurrentUserProfile({
-            displayName: cred.user.displayName || 'YourBby User',
-            username: cred.user.email?.split('@')[0] || `user_${Date.now()}`,
-          });
+          await switchUserAccount(cred.user.uid);
           onClose();
         }
       }
     } catch (err: any) {
       console.error('Auth Error:', err);
-      // Helpful friendly message
       if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
         setErrorMessage('Invalid email or password.');
       } else if (err.code === 'auth/email-already-in-use') {
@@ -109,37 +110,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Instant Test Account Switcher for Real Two-Way QA Testing
-  const handleSwitchToDemoUser = async (userKey: 'rohan' | 'priya' | 'aarav') => {
-    const profiles = {
-      rohan: {
-        id: 'u_rohan',
-        username: 'rohanroy',
-        displayName: 'Rohan Roy',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=300&auto=format&fit=crop&q=80',
-        bio: 'Visual storyteller & digital creator 📸 Exploring Kolkata & Mumbai',
-        location: 'Mumbai, India',
-      },
-      priya: {
-        id: 'u_priya',
-        username: 'priyasen',
-        displayName: 'Priya Sen',
-        avatar: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&auto=format&fit=crop&q=80',
-        bio: 'Fashion designer & contemporary art lover ✨ Victoria Memorial sunsets',
-        location: 'Kolkata, India',
-      },
-      aarav: {
-        id: 'u_aarav',
-        username: 'aaravsharma',
-        displayName: 'Aarav Sharma',
-        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=300&auto=format&fit=crop&q=80',
-        bio: 'Product builder & photographer. Building next-gen software 🚀',
-        location: 'Bengaluru, India',
-      }
-    };
-
-    await updateCurrentUserProfile(profiles[userKey]);
-    onClose();
+  const handleSwitchAccount = async (userId: string) => {
+    setIsLoading(true);
+    try {
+      await switchUserAccount(userId);
+      onClose();
+    } catch (e: any) {
+      setErrorMessage(e.message || 'Failed to switch account');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -156,7 +136,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               />
             </div>
             <div>
-              <h3 className="font-extrabold text-base text-slate-900 dark:text-white">YourBby Account</h3>
+              <h3 className="font-extrabold text-base text-slate-900 dark:text-white">YourBby Accounts</h3>
               <p className="text-[10px] text-slate-400">YOUR WORLD. YOUR PEOPLE.</p>
             </div>
           </div>
@@ -169,28 +149,31 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         {/* Mode Selector */}
         <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1 text-xs font-bold">
           <button
-            onClick={() => { setMode('login'); setErrorMessage(null); }}
-            className={`flex-1 py-1.5 rounded-lg transition-all ${
-              mode === 'login' ? 'bg-white dark:bg-slate-900 text-rose-500 shadow-xs' : 'text-slate-500'
-            }`}
-          >
-            Login
-          </button>
-          <button
-            onClick={() => { setMode('register'); setErrorMessage(null); }}
-            className={`flex-1 py-1.5 rounded-lg transition-all ${
-              mode === 'register' ? 'bg-white dark:bg-slate-900 text-rose-500 shadow-xs' : 'text-slate-500'
-            }`}
-          >
-            Register
-          </button>
-          <button
+            type="button"
             onClick={() => { setMode('switch'); setErrorMessage(null); }}
             className={`flex-1 py-1.5 rounded-lg transition-all ${
               mode === 'switch' ? 'bg-white dark:bg-slate-900 text-rose-500 shadow-xs' : 'text-slate-500'
             }`}
           >
-            Switch User
+            Accounts ({allUsers.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode('register'); setErrorMessage(null); }}
+            className={`flex-1 py-1.5 rounded-lg transition-all ${
+              mode === 'register' ? 'bg-white dark:bg-slate-900 text-rose-500 shadow-xs' : 'text-slate-500'
+            }`}
+          >
+            New Account
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode('login'); setErrorMessage(null); }}
+            className={`flex-1 py-1.5 rounded-lg transition-all ${
+              mode === 'login' ? 'bg-white dark:bg-slate-900 text-rose-500 shadow-xs' : 'text-slate-500'
+            }`}
+          >
+            Firebase Login
           </button>
         </div>
 
@@ -201,11 +184,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </div>
         )}
 
-        {/* Tab 1 & 2: Login / Register with Firebase */}
+        {/* Tab: Login / Register */}
         {(mode === 'login' || mode === 'register') && (
           <div className="space-y-3">
-            {/* Google Sign-in */}
             <button
+              type="button"
               onClick={handleGoogleSignIn}
               disabled={isLoading}
               className="w-full py-2.5 px-4 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700/80 border border-slate-200 dark:border-slate-700 rounded-2xl text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center justify-center gap-2 transition-all"
@@ -221,7 +204,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
             <div className="flex items-center gap-3 my-2">
               <span className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Or with Email</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase">Or Account Details</span>
               <span className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
             </div>
 
@@ -229,14 +212,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               {mode === 'register' && (
                 <>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Full Name</label>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Display Name</label>
                     <input
                       type="text"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder="e.g. Maya Roy"
+                      placeholder="e.g. Mohammad Siraj"
                       required
-                      className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs focus:outline-none"
+                      className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
                     />
                   </div>
                   <div>
@@ -245,35 +228,49 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="e.g. mayaroy"
+                      placeholder="e.g. mohammadsiraj"
                       required
-                      className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs focus:outline-none"
+                      className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Bio (Optional)</label>
+                    <input
+                      type="text"
+                      value={bio}
+                      onChange={(e) => setBio(e.target.value)}
+                      placeholder="Tell people about yourself..."
+                      className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
                     />
                   </div>
                 </>
               )}
 
               <div>
-                <label className="text-[11px] font-bold text-slate-500 block mb-1">Email Address</label>
+                <label className="text-[11px] font-bold text-slate-500 block mb-1">
+                  Email Address {mode === 'register' ? '(Optional for local session)' : ''}
+                </label>
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@domain.com"
-                  required
-                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs focus:outline-none"
+                  required={mode === 'login'}
+                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="text-[11px] font-bold text-slate-500 block mb-1">Password</label>
+                <label className="text-[11px] font-bold text-slate-500 block mb-1">
+                  Password {mode === 'register' ? '(Optional for local session)' : ''}
+                </label>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  required
-                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs focus:outline-none"
+                  required={mode === 'login'}
+                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
                 />
               </div>
 
@@ -297,83 +294,66 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 disabled={isLoading}
                 className="w-full py-2.5 bg-gradient-to-r from-rose-500 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-500/20"
               >
-                {isLoading ? 'Processing...' : mode === 'register' ? 'Create Account' : 'Log In'}
+                {isLoading ? 'Processing...' : mode === 'register' ? 'Create Real Account' : 'Log In'}
               </button>
             </form>
           </div>
         )}
 
-        {/* Tab 3: Switch Test Account (Essential for testing two-way messaging & QA) */}
+        {/* Tab: Switch Between Real Registered Accounts */}
         {mode === 'switch' && (
           <div className="space-y-3">
             <p className="text-xs text-slate-500">
-              Switch immediately to test real two-way messaging, friend requests, and permission rules between independent accounts:
+              Switch between registered accounts to test real two-way messaging, read receipts, and WebRTC calls:
             </p>
 
-            <button
-              onClick={() => handleSwitchToDemoUser('rohan')}
-              className={`w-full p-3 rounded-2xl border flex items-center justify-between text-left transition-all ${
-                currentUser?.username === 'rohanroy'
-                  ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20'
-                  : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <img
-                  src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&auto=format&fit=crop&q=80"
-                  alt="Rohan"
-                  className="w-10 h-10 rounded-full object-cover"
-                />
-                <div>
-                  <h4 className="font-bold text-xs text-slate-900 dark:text-white">Rohan Roy (User A)</h4>
-                  <p className="text-[11px] text-slate-400">@rohanroy · Visual Creator</p>
-                </div>
-              </div>
-              {currentUser?.username === 'rohanroy' && <Check className="w-4 h-4 text-rose-500" />}
-            </button>
+            <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+              {allUsers.map(user => {
+                const isActive = currentUser?.id === user.id;
+                return (
+                  <button
+                    key={user.id}
+                    type="button"
+                    onClick={() => handleSwitchAccount(user.id)}
+                    className={`w-full p-3 rounded-2xl border flex items-center justify-between text-left transition-all ${
+                      isActive
+                        ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20'
+                        : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <img
+                        src={user.avatar}
+                        alt={user.displayName}
+                        className="w-10 h-10 rounded-full object-cover shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <h4 className="font-bold text-xs text-slate-900 dark:text-white truncate">
+                          {user.displayName}
+                          {user.badge && (
+                            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-500">
+                              {user.badge}
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-[11px] text-slate-400 truncate">
+                          @{user.username} {user.bio ? `· ${user.bio}` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    {isActive && <Check className="w-4 h-4 text-rose-500 shrink-0" />}
+                  </button>
+                );
+              })}
+            </div>
 
             <button
-              onClick={() => handleSwitchToDemoUser('priya')}
-              className={`w-full p-3 rounded-2xl border flex items-center justify-between text-left transition-all ${
-                currentUser?.username === 'priyasen'
-                  ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20'
-                  : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
-              }`}
+              type="button"
+              onClick={() => setMode('register')}
+              className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-xs font-bold text-rose-500 hover:bg-rose-500/5 flex items-center justify-center gap-1.5 transition"
             >
-              <div className="flex items-center gap-3">
-                <img
-                  src="https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&auto=format&fit=crop&q=80"
-                  alt="Priya"
-                  className="w-10 h-10 rounded-full object-cover"
-                />
-                <div>
-                  <h4 className="font-bold text-xs text-slate-900 dark:text-white">Priya Sen (User B)</h4>
-                  <p className="text-[11px] text-slate-400">@priyasen · Fashion Designer</p>
-                </div>
-              </div>
-              {currentUser?.username === 'priyasen' && <Check className="w-4 h-4 text-rose-500" />}
-            </button>
-
-            <button
-              onClick={() => handleSwitchToDemoUser('aarav')}
-              className={`w-full p-3 rounded-2xl border flex items-center justify-between text-left transition-all ${
-                currentUser?.username === 'aaravsharma'
-                  ? 'border-rose-500 bg-rose-50/50 dark:bg-rose-950/20'
-                  : 'border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <img
-                  src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=100&auto=format&fit=crop&q=80"
-                  alt="Aarav"
-                  className="w-10 h-10 rounded-full object-cover"
-                />
-                <div>
-                  <h4 className="font-bold text-xs text-slate-900 dark:text-white">Aarav Sharma (User C)</h4>
-                  <p className="text-[11px] text-slate-400">@aaravsharma · Tech Founder</p>
-                </div>
-              </div>
-              {currentUser?.username === 'aaravsharma' && <Check className="w-4 h-4 text-rose-500" />}
+              <UserPlus className="w-4 h-4" />
+              <span>Register Another User Account</span>
             </button>
           </div>
         )}

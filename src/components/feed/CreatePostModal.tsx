@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext.tsx';
 import { CameraCaptureModal } from '../camera/CameraCaptureModal.tsx';
 import { MediaEditorModal } from '../media/MediaEditorModal.tsx';
@@ -70,9 +70,13 @@ export const CreatePostModal: React.FC = () => {
   const [showAiPanel, setShowAiPanel] = useState(false);
 
   // Story state
-  const [storyMedia, setStoryMedia] = useState('https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800&auto=format&fit=crop&q=80');
+  const [storyMedia, setStoryMedia] = useState('');
+  const [storyMediaType, setStoryMediaType] = useState<'image' | 'video' | 'text'>('text');
   const [storyText, setStoryText] = useState('');
-  const [storyGradient, setStoryGradient] = useState('from-purple-600 to-indigo-600');
+  const [storyGradient, setStoryGradient] = useState('from-rose-500 via-purple-600 to-indigo-700');
+  const [storyPrivacy, setStoryPrivacy] = useState<'public' | 'friends' | 'close_friends'>('public');
+  const [storyLocationSticker, setStoryLocationSticker] = useState('');
+  const [storyMusicSticker, setStoryMusicSticker] = useState('');
 
   // Reel state
   const [reelVideoUrl, setReelVideoUrl] = useState('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4');
@@ -82,8 +86,15 @@ export const CreatePostModal: React.FC = () => {
   // Note state
   const [noteText, setNoteText] = useState('');
   const [noteMusic, setNoteMusic] = useState('');
+  const [fileError, setFileError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (isCreateModalOpen && createModalInitialTab) {
+      setActiveTab(createModalInitialTab as any);
+    }
+  }, [isCreateModalOpen, createModalInitialTab]);
 
   if (!isCreateModalOpen) return null;
 
@@ -91,11 +102,12 @@ export const CreatePostModal: React.FC = () => {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    setFileError(null);
 
     Array.from(files).forEach((file) => {
       // Validate file size (max 25MB)
       if (file.size > 25 * 1024 * 1024) {
-        alert('File size exceeds 25MB limit.');
+        setFileError(`"${file.name}" exceeds the 25MB limit.`);
         return;
       }
       const reader = new FileReader();
@@ -106,15 +118,23 @@ export const CreatePostModal: React.FC = () => {
             setMediaType('video');
             setMediaUrls([result]);
             if (activeTab === 'reel') setReelVideoUrl(result);
+            if (activeTab === 'story') {
+              setStoryMedia(result);
+              setStoryMediaType('video');
+            }
           } else {
             setMediaType('image');
             setMediaUrls((prev) => [...prev, result]);
-            if (activeTab === 'story') setStoryMedia(result);
+            if (activeTab === 'story') {
+              setStoryMedia(result);
+              setStoryMediaType('image');
+            }
           }
         }
       };
       reader.readAsDataURL(file);
     });
+    e.target.value = '';
   };
 
   // Handle media captured by camera
@@ -125,6 +145,7 @@ export const CreatePostModal: React.FC = () => {
       setReelVideoUrl(url);
     } else if (activeTab === 'story') {
       setStoryMedia(url);
+      setStoryMediaType(type);
     }
   };
 
@@ -155,12 +176,29 @@ export const CreatePostModal: React.FC = () => {
 
   const handleStorySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!storyMedia && !storyText.trim()) {
+      setFileError('Please add a photo, video, or text for your story.');
+      return;
+    }
+    const stickers: { type: 'location' | 'music'; text: string }[] = [];
+    if (storyLocationSticker.trim()) {
+      stickers.push({ type: 'location', text: storyLocationSticker.trim() });
+    }
+    if (storyMusicSticker.trim()) {
+      stickers.push({ type: 'music', text: storyMusicSticker.trim() });
+    }
     await createStory({
-      mediaUrl: storyMedia,
-      mediaType: 'image',
+      mediaUrl: storyMedia || undefined,
+      mediaType: storyMedia ? storyMediaType : 'text',
       textOverlay: storyText.trim() || undefined,
-      backgroundGradient: storyGradient
+      backgroundGradient: storyGradient,
+      privacy: storyPrivacy,
+      stickers,
     });
+    setStoryMedia('');
+    setStoryText('');
+    setStoryLocationSticker('');
+    setStoryMusicSticker('');
     handleClose();
   };
 
@@ -271,6 +309,15 @@ export const CreatePostModal: React.FC = () => {
             onChange={handleFileChange}
             className="hidden"
           />
+
+          {fileError && (
+            <div className="mx-5 mt-3 px-3.5 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs flex items-center justify-between">
+              <span>{fileError}</span>
+              <button type="button" onClick={() => setFileError(null)} className="p-0.5 hover:opacity-75">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
 
           {/* Form Content: Post / Poll */}
           {(activeTab === 'post' || activeTab === 'poll') && (
@@ -529,55 +576,136 @@ export const CreatePostModal: React.FC = () => {
           {/* Form Content: Story */}
           {activeTab === 'story' && (
             <form onSubmit={handleStorySubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
-              <p className="text-xs text-slate-500">
-                Capture with camera or pick from gallery. Disappears automatically in 24 hours.
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-slate-500">
+                  Share a photo, video, or text story. Automatically expires in 24 hours.
+                </p>
+                <select
+                  value={storyPrivacy}
+                  onChange={(e) => setStoryPrivacy(e.target.value as any)}
+                  className="px-2.5 py-1 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-semibold text-slate-700 dark:text-slate-200 focus:outline-none"
+                >
+                  <option value="public">Public Story</option>
+                  <option value="friends">Friends Only</option>
+                  <option value="close_friends">Close Friends</option>
+                </select>
+              </div>
 
-              <div className="flex gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <button
                   type="button"
                   onClick={() => {
-                    setCameraMode('photo');
+                    setCameraMode('both');
                     setIsCameraOpen(true);
                   }}
-                  className="flex-1 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold flex items-center justify-center gap-1.5"
+                  className="py-2 px-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition"
                 >
-                  <Camera className="w-4 h-4 text-rose-500" />
-                  <span>Camera Photo</span>
+                  <Camera className="w-4 h-4 text-rose-500 shrink-0" />
+                  <span className="truncate">Camera</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex-1 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold flex items-center justify-center gap-1.5"
+                  className="py-2 px-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition"
                 >
-                  <Upload className="w-4 h-4 text-indigo-500" />
-                  <span>Choose Gallery</span>
+                  <Upload className="w-4 h-4 text-indigo-500 shrink-0" />
+                  <span className="truncate">Photo / Video</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStoryMedia('');
+                    setStoryMediaType('text');
+                  }}
+                  className="py-2 px-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                >
+                  <FileText className="w-4 h-4 text-emerald-500 shrink-0" />
+                  <span className="truncate">Text Story</span>
                 </button>
               </div>
+
+              {/* Gradient Background Picker for Text Stories */}
+              {!storyMedia && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-slate-500">Background:</span>
+                  {[
+                    'from-rose-500 via-purple-600 to-indigo-700',
+                    'from-slate-900 via-indigo-950 to-purple-900',
+                    'from-amber-500 via-rose-500 to-pink-600',
+                    'from-emerald-500 via-teal-600 to-cyan-700',
+                  ].map((grad) => (
+                    <button
+                      key={grad}
+                      type="button"
+                      onClick={() => setStoryGradient(grad)}
+                      className={`w-6 h-6 rounded-full bg-gradient-to-br ${grad} ${
+                        storyGradient === grad ? 'ring-2 ring-white ring-offset-2 ring-offset-slate-900' : ''
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
 
               <input
                 type="text"
                 value={storyText}
                 onChange={(e) => setStoryText(e.target.value)}
-                placeholder="Story text overlay..."
-                className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs focus:outline-none"
+                placeholder="Write story text or caption overlay..."
+                className="w-full px-3.5 py-2.5 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
               />
 
-              {/* Preview */}
-              <div className="w-48 h-72 mx-auto rounded-2xl overflow-hidden relative shadow-lg ring-2 ring-rose-500/20">
-                <img src={storyMedia} alt="Preview" className="w-full h-full object-cover" />
-                {storyText && (
-                  <div className="absolute inset-0 bg-black/30 flex items-center justify-center p-4">
-                    <p className="text-white font-bold text-sm text-center drop-shadow-md">{storyText}</p>
+              {/* Stickers Row: Location & Music */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                  <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <input
+                    type="text"
+                    value={storyLocationSticker}
+                    onChange={(e) => setStoryLocationSticker(e.target.value)}
+                    placeholder="Add location sticker..."
+                    className="w-full bg-transparent text-xs focus:outline-none"
+                  />
+                </div>
+                <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl">
+                  <Music className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                  <input
+                    type="text"
+                    value={storyMusicSticker}
+                    onChange={(e) => setStoryMusicSticker(e.target.value)}
+                    placeholder="Add music track title..."
+                    className="w-full bg-transparent text-xs focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* 9:16 Portrait Story Preview */}
+              <div className="w-44 h-72 mx-auto rounded-2xl overflow-hidden relative shadow-lg border border-slate-200 dark:border-slate-700 bg-slate-950">
+                {storyMedia && storyMediaType === 'video' ? (
+                  <video src={storyMedia} autoPlay muted loop playsInline className="w-full h-full object-cover" />
+                ) : storyMedia ? (
+                  <img src={storyMedia} alt="Story Preview" className="w-full h-full object-cover" />
+                ) : (
+                  <div
+                    className={`w-full h-full bg-gradient-to-br ${storyGradient} flex items-center justify-center p-4`}
+                  >
+                    <p className="text-white font-bold text-sm text-center drop-shadow-md">
+                      {storyText || 'Your Story Preview'}
+                    </p>
+                  </div>
+                )}
+
+                {storyMedia && storyText && (
+                  <div className="absolute inset-x-2 bottom-3 bg-black/55 backdrop-blur-xs rounded-xl p-2">
+                    <p className="text-white font-semibold text-xs text-center">{storyText}</p>
                   </div>
                 )}
               </div>
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-xl text-sm font-bold shadow-md shadow-rose-500/20 transition-all"
+                className="w-full py-2.5 bg-gradient-to-r from-rose-500 to-indigo-600 hover:from-rose-600 hover:to-indigo-700 text-white rounded-xl text-sm font-bold shadow-md shadow-rose-500/20 transition-all"
               >
-                Publish Story
+                Publish to Your Story
               </button>
             </form>
           )}

@@ -1,5 +1,5 @@
 import { doc, setDoc, getDoc, collection, getDocs, deleteDoc } from 'firebase/firestore';
-import { db, auth } from './config.ts';
+import { db, auth, sanitizeUserForFirestore } from './config.ts';
 import type {
   User,
   Post,
@@ -208,12 +208,12 @@ function saveStore(store: StaticStore) {
   }
 }
 
-// Sync signed-in user changes with real Firestore database when available
+// Sync user profile changes with real Firestore database using canonical user ID
 async function syncUserToFirestore(user: User) {
-  if (!auth.currentUser) return;
   try {
-    const uid = auth.currentUser.uid;
-    await setDoc(doc(db, 'users', uid), { ...user, id: uid }, { merge: true });
+    const uid = auth.currentUser?.uid || user.id;
+    const payload = await sanitizeUserForFirestore({ ...user, id: uid });
+    await setDoc(doc(db, 'users', uid), payload, { merge: true });
   } catch (e) {
     console.warn('Firestore user sync skipped:', e);
   }
@@ -243,12 +243,19 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
   const body = init?.body ? JSON.parse(String(init.body)) : {};
   const store = loadStore();
 
-  // Pull from Firestore if signed in on initial /api/me or /api/feed
-  if (auth.currentUser && path === '/api/me' && method === 'GET') {
+  // Pull from Firestore on /api/me GET
+  if (path === '/api/me' && method === 'GET') {
     try {
-      const snap = await getDoc(doc(db, 'users', auth.currentUser.uid));
+      const targetId = auth.currentUser?.uid || store.currentUser.id;
+      const snap = await getDoc(doc(db, 'users', targetId));
       if (snap.exists()) {
-        store.currentUser = { ...store.currentUser, ...(snap.data() as User) };
+        const fsData = snap.data() as User;
+        const resolvedCover = fsData.coverPhotoURL !== undefined ? fsData.coverPhotoURL : fsData.coverPhoto;
+        store.currentUser = {
+          ...store.currentUser,
+          ...fsData,
+          ...(resolvedCover !== undefined ? { coverPhotoURL: resolvedCover, coverPhoto: resolvedCover } : {})
+        };
         saveStore(store);
       }
     } catch (_) {}
@@ -283,10 +290,26 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
       }
       body.username = clean;
     }
-    store.currentUser = { ...store.currentUser, ...body };
+    const nextUser: User = { ...store.currentUser, ...body };
+    if (body.coverPhotoURL !== undefined || body.coverPhoto !== undefined) {
+      const resolvedCover = body.coverPhotoURL !== undefined ? body.coverPhotoURL : body.coverPhoto;
+      nextUser.coverPhotoURL = resolvedCover || '';
+      nextUser.coverPhoto = resolvedCover || '';
+    }
+    // Never overwrite avatar unless explicitly provided as non-empty string
+    if (body.avatar === undefined) {
+      nextUser.avatar = store.currentUser.avatar;
+    }
+    store.currentUser = nextUser;
     store.usersList = store.usersList.map(u => (u.id === store.currentUser.id ? store.currentUser : u));
     store.postsList = store.postsList.map(p =>
       p.author.id === store.currentUser.id ? { ...p, author: store.currentUser } : p
+    );
+    store.storiesList = store.storiesList.map(s =>
+      s.author.id === store.currentUser.id ? { ...s, author: store.currentUser } : s
+    );
+    store.reelsList = store.reelsList.map(r =>
+      r.author.id === store.currentUser.id ? { ...r, author: store.currentUser } : r
     );
     saveStore(store);
     await syncUserToFirestore(store.currentUser);
@@ -444,6 +467,12 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
 
   // 5. /api/stories
   if (path === '/api/stories' && method === 'GET') {
+    const nowMs = Date.now();
+    store.storiesList = store.storiesList.filter(s => {
+      const exp = new Date(s.expiresAt).getTime();
+      return Number.isNaN(exp) || exp > nowMs;
+    });
+    saveStore(store);
     return jsonResponse({ success: true, stories: store.storiesList });
   }
   if (path === '/api/stories' && method === 'POST') {
@@ -453,18 +482,66 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
       id: `story_${Date.now()}`,
       author: store.currentUser,
       mediaUrl: body.mediaUrl || '',
-      mediaType: body.mediaType || 'image',
+      mediaType: body.mediaType || (body.mediaUrl ? 'image' : 'text'),
       textOverlay: body.textOverlay || body.caption,
       backgroundGradient: body.backgroundGradient,
+      privacy: body.privacy || 'public',
       createdAt: now.toISOString(),
       expiresAt: expires.toISOString(),
       seen: false,
       viewsCount: 0,
+      viewerIds: [],
+      viewers: [],
       stickers: body.stickers || [],
     };
     store.storiesList = [story, ...store.storiesList];
     saveStore(store);
+    if (auth.currentUser) {
+      setDoc(doc(db, 'stories', story.id), story, { merge: true }).catch(() => {});
+    }
     return jsonResponse({ success: true, story });
+  }
+
+  const storyActionMatch = path.match(/^\/api\/stories\/([^/]+)(?:\/(view))?$/);
+  if (storyActionMatch) {
+    const storyId = storyActionMatch[1];
+    const sub = storyActionMatch[2];
+    if (sub === 'view' && method === 'POST') {
+      let updatedStory: Story | undefined;
+      store.storiesList = store.storiesList.map(s => {
+        if (s.id !== storyId) return s;
+        const viewerIds = Array.isArray(s.viewerIds) ? [...s.viewerIds] : [];
+        const viewers = Array.isArray(s.viewers) ? [...s.viewers] : [];
+        if (!viewerIds.includes(store.currentUser.id)) {
+          viewerIds.push(store.currentUser.id);
+          viewers.unshift({
+            id: store.currentUser.id,
+            displayName: store.currentUser.displayName,
+            username: store.currentUser.username,
+            avatar: store.currentUser.avatar,
+            viewedAt: new Date().toISOString(),
+          });
+        }
+        updatedStory = {
+          ...s,
+          seen: true,
+          viewerIds,
+          viewers,
+          viewsCount: Math.max(s.viewsCount + 1, viewerIds.length),
+        };
+        return updatedStory;
+      });
+      saveStore(store);
+      return jsonResponse({ success: true, story: updatedStory });
+    }
+    if (!sub && method === 'DELETE') {
+      store.storiesList = store.storiesList.filter(s => s.id !== storyId);
+      saveStore(store);
+      if (auth.currentUser) {
+        deleteDoc(doc(db, 'stories', storyId)).catch(() => {});
+      }
+      return jsonResponse({ success: true });
+    }
   }
 
   // 6. /api/reels
@@ -520,29 +597,131 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
   if (path === '/api/messages/conversations' && method === 'GET') {
     return jsonResponse({ success: true, conversations: store.conversationsList });
   }
+  if (path === '/api/messages/conversations' && method === 'POST') {
+    const targetId = body.participantId || body.participant?.id;
+    const targetUser = store.usersList.find(u => u.id === targetId) || body.participant || officialPlatformUser;
+    let conv = store.conversationsList.find(c => !c.isGroup && c.participants.some(p => p.id === targetUser.id));
+    if (!conv) {
+      conv = {
+        id: `conv_${Date.now()}`,
+        isGroup: false,
+        participants: [store.currentUser, targetUser],
+        participantIds: [store.currentUser.id, targetUser.id],
+        unreadCount: 0,
+        updatedAt: new Date().toISOString(),
+      };
+      store.conversationsList.unshift(conv);
+      store.messagesMap[conv.id] = [];
+      saveStore(store);
+    }
+    if (auth.currentUser) {
+      setDoc(doc(db, 'conversations', conv.id), conv, { merge: true }).catch(() => {});
+    }
+    return jsonResponse({ success: true, conversation: conv, messages: store.messagesMap[conv.id] || [] });
+  }
+
   const convMsgMatch = path.match(/^\/api\/messages\/conversations\/([^/]+)(?:\/send)?$/);
   if (convMsgMatch) {
     const convId = convMsgMatch[1];
+    const conv = store.conversationsList.find(c => c.id === convId);
     if (method === 'GET') {
-      return jsonResponse({ success: true, messages: store.messagesMap[convId] || [] });
+      const msgs = store.messagesMap[convId] || [];
+      msgs.forEach(m => {
+        if (m.senderId !== store.currentUser.id) {
+          m.read = true;
+          m.status = 'read';
+          m.readAt = new Date().toISOString();
+        }
+      });
+      if (conv) conv.unreadCount = 0;
+      saveStore(store);
+      return jsonResponse({ success: true, conversation: conv, messages: msgs });
+    }
+    if (method === 'PATCH' && conv) {
+      if (body.action === 'pin') conv.isPinned = !conv.isPinned;
+      if (body.action === 'mute') conv.isMuted = !conv.isMuted;
+      if (body.action === 'archive') conv.isArchived = !conv.isArchived;
+      if (body.action === 'mark_read') conv.unreadCount = 0;
+      saveStore(store);
+      return jsonResponse({ success: true, conversation: conv });
+    }
+    if (method === 'DELETE') {
+      store.conversationsList = store.conversationsList.filter(c => c.id !== convId);
+      saveStore(store);
+      return jsonResponse({ success: true });
     }
     if (method === 'POST') {
+      const nowIso = new Date().toISOString();
       const msg: Message = {
         id: `msg_${Date.now()}`,
         conversationId: convId,
         senderId: store.currentUser.id,
         sender: store.currentUser,
         text: body.text || '',
-        mediaUrl: body.mediaUrl,
+        mediaUrl: body.mediaUrl || (Array.isArray(body.mediaUrls) ? body.mediaUrls[0] : undefined),
+        mediaUrls: body.mediaUrls,
         mediaType: body.mediaType,
-        createdAt: new Date().toISOString(),
+        fileName: body.fileName,
+        fileSize: body.fileSize,
+        voiceDurationSeconds: body.voiceDurationSeconds,
+        voiceWaveform: body.voiceWaveform,
+        replyTo: body.replyTo,
+        createdAt: nowIso,
+        deliveredAt: nowIso,
+        status: 'delivered',
         read: false,
         reactions: [],
       };
       store.messagesMap[convId] = [...(store.messagesMap[convId] || []), msg];
+      if (conv) {
+        conv.lastMessage = msg;
+        conv.updatedAt = nowIso;
+      }
+      saveStore(store);
+      if (auth.currentUser) {
+        setDoc(doc(db, 'conversations', convId, 'messages', msg.id), msg, { merge: true }).catch(() => {});
+      }
+      return jsonResponse({ success: true, message: msg, conversation: conv });
+    }
+  }
+
+  const msgEditMatch = path.match(/^\/api\/messages\/([^/]+)\/([^/]+)$/);
+  if (msgEditMatch) {
+    const [, convId, msgId] = msgEditMatch;
+    const msgs = store.messagesMap[convId] || [];
+    const msg = msgs.find(m => m.id === msgId);
+    if (!msg) return jsonResponse({ error: 'Message not found' }, 404);
+    if (method === 'PATCH') {
+      if (typeof body.text === 'string' && msg.senderId === store.currentUser.id) {
+        msg.text = body.text.trim();
+        msg.isEdited = true;
+        msg.editedAt = new Date().toISOString();
+      }
+      if (body.reactionEmoji) {
+        if (!msg.reactions) msg.reactions = [];
+        const existing = msg.reactions.findIndex(r => r.userId === store.currentUser.id && r.emoji === body.reactionEmoji);
+        if (existing !== -1) msg.reactions.splice(existing, 1);
+        else {
+          msg.reactions = msg.reactions.filter(r => r.userId !== store.currentUser.id);
+          msg.reactions.push({ emoji: body.reactionEmoji, userId: store.currentUser.id, userName: store.currentUser.displayName });
+        }
+      }
       saveStore(store);
       return jsonResponse({ success: true, message: msg });
     }
+    if (method === 'DELETE' && msg.senderId === store.currentUser.id) {
+      msg.isDeleted = true;
+      msg.text = 'This message was deleted';
+      msg.mediaUrl = undefined;
+      msg.mediaUrls = undefined;
+      msg.mediaType = undefined;
+      saveStore(store);
+      return jsonResponse({ success: true, message: msg });
+    }
+  }
+
+  if (path === '/api/calls' && method === 'GET') {
+    return jsonResponse({ success: true, calls: [], incomingCall: null });
   }
 
   // 9. /api/groups, /api/events, /api/notifications, /api/live, /api/analytics, /api/admin
@@ -604,35 +783,47 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
   return jsonResponse({ success: true });
 }
 
-// Install transparent fetch interceptor for static hosting / offline fallback
+// Safe API fetch wrapper with static hosting / offline fallback + active user session header
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+
+  const isApiCall =
+    urlStr.startsWith('/api/') ||
+    (typeof window !== 'undefined' &&
+      urlStr.startsWith(window.location.origin) &&
+      new URL(urlStr).pathname.startsWith('/api/'));
+
+  if (!isApiCall) {
+    return window.fetch(input, init);
+  }
+
+  // Automatically attach active user ID from sessionStorage or localStorage for multi-account / 2-user testing
+  const activeUserId =
+    typeof window !== 'undefined'
+      ? sessionStorage.getItem('yourbby_active_user_id') || localStorage.getItem('yourbby_active_user_id')
+      : null;
+
+  const headers = new Headers(init?.headers || {});
+  if (activeUserId && !headers.has('x-user-id')) {
+    headers.set('x-user-id', activeUserId);
+  }
+  const nextInit: RequestInit = { ...init, headers };
+
+  try {
+    const response = await window.fetch(input, nextInit);
+    const contentType = response.headers.get('content-type') || '';
+    // If backend server.ts answered with valid JSON, return it directly
+    if (contentType.includes('application/json')) {
+      return response;
+    }
+    // If static hosting returned HTML rewrite or 502, fall back to client Firestore + localStorage store
+    return await handleClientApiFallback(urlStr, nextInit);
+  } catch {
+    // Network offline or backend unreachable -> fall back to client Firestore + localStorage store
+    return await handleClientApiFallback(urlStr, nextInit);
+  }
+}
+
 export function installStaticApiFallback() {
-  if (typeof window === 'undefined') return;
-  const originalFetch = window.fetch.bind(window);
-
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
-
-    const isApiCall =
-      urlStr.startsWith('/api/') ||
-      (urlStr.startsWith(window.location.origin) &&
-        new URL(urlStr).pathname.startsWith('/api/'));
-
-    if (!isApiCall) {
-      return originalFetch(input, init);
-    }
-
-    try {
-      const response = await originalFetch(input, init);
-      const contentType = response.headers.get('content-type') || '';
-      // If backend server.ts answered with valid JSON, return it directly
-      if (response.ok && contentType.includes('application/json')) {
-        return response;
-      }
-      // If static hosting returned HTML rewrite or 404/502, fall back to client Firestore + localStorage store
-      return await handleClientApiFallback(urlStr, init);
-    } catch {
-      // Network offline or backend unreachable -> fall back to client Firestore + localStorage store
-      return await handleClientApiFallback(urlStr, init);
-    }
-  };
+  // No-op: never mutate window.fetch directly because window.fetch is getter-only in AI Studio preview
 }

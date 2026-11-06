@@ -1,6 +1,6 @@
 {
   "name": "YourBby — Global Social Network",
   "description": "Your world. Your people. The ultimate global social networking platform combining feed, stories, full-screen reels, messenger, communities, creator tools, and AI intelligence.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera", "microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -1,0 +1,666 @@
+{
+  "currentUser": {
+    "id": "u_owner_mohammad_siraj",
+    "username": "mohammadsiraj",
+    "displayName": "Mohammad Siraj",
+    "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+    "coverPhoto": "",
+    "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+    "location": "India",
+    "website": "https://yourbby.social/@mohammadsiraj",
+    "verified": true,
+    "role": "admin",
+    "followersCount": 0,
+    "followingCount": 0,
+    "friendsCount": 0,
+    "isOnline": true,
+    "badge": "Founder & Owner",
+    "privacy": "public",
+    "lastSeen": "2026-11-06T15:34:31.422Z",
+    "coverPhotoURL": ""
+  },
+  "usersList": [
+    {
+      "id": "u_owner_mohammad_siraj",
+      "username": "mohammadsiraj",
+      "displayName": "Mohammad Siraj",
+      "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+      "coverPhoto": "",
+      "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+      "location": "India",
+      "website": "https://yourbby.social/@mohammadsiraj",
+      "verified": true,
+      "role": "admin",
+      "followersCount": 0,
+      "followingCount": 0,
+      "friendsCount": 0,
+      "isOnline": true,
+      "badge": "Founder & Owner",
+      "privacy": "public",
+      "lastSeen": "2026-11-06T15:34:31.422Z",
+      "coverPhotoURL": ""
+    },
+    {
+      "id": "u_admin",
+      "username": "yourbby_hq",
+      "displayName": "YourBby Official",
+      "avatar": "/src/assets/images/yourbby_logo_mark_1793866710902.jpg",
+      "bio": "Official platform news, community guidelines, and global support for YourBby 🌐",
+      "location": "Global / India",
+      "verified": true,
+      "role": "admin",
+      "followersCount": 1,
+      "followingCount": 0,
+      "friendsCount": 0,
+      "isOnline": true,
+      "isFollowing": true,
+      "isFriend": false,
+      "privacy": "public",
+      "lastSeen": "2026-11-06T15:06:04.948Z"
+    }
+  ],
+  "postsList": [
+    {
+      "id": "p_welcome",
+      "authorId": "u_admin",
+      "author": {
+        "id": "u_admin",
+        "username": "yourbby_hq",
+        "displayName": "YourBby Official",
+        "avatar": "/src/assets/images/yourbby_logo_mark_1793866710902.jpg",
+        "bio": "Official platform news, community guidelines, and global support for YourBby 🌐",
+        "location": "Global / India",
+        "verified": true,
+        "role": "admin",
+        "followersCount": 1,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "isFollowing": true,
+        "isFriend": false,
+        "privacy": "public",
+        "lastSeen": "2026-11-06T11:31:58.024Z"
+      },
+      "content": "Welcome to YourBby — YOUR WORLD. YOUR PEOPLE. ✨\n\nExperience genuine, unfiltered social connection. Create your first post, upload a reel, capture real moments with our camera, or connect with your community.",
+      "mediaUrls": [],
+      "mediaType": "image",
+      "locationName": "YourBby Global",
+      "feeling": {
+        "emoji": "🌐",
+        "text": "welcoming the world"
+      },
+      "audience": "public",
+      "createdAt": "2026-11-06T11:31:36.441Z",
+      "likesCount": 0,
+      "userReaction": null,
+      "reactionCounts": {
+        "like": 0,
+        "love": 0,
+        "care": 0,
+        "haha": 0,
+        "wow": 0,
+        "sad": 0,
+        "angry": 0
+      },
+      "commentsCount": 0,
+      "repostsCount": 0,
+      "isBookmarked": false,
+      "tags": [
+        "YourBby",
+        "YourWorldYourPeople",
+        "Community"
+      ]
+    }
+  ],
+  "commentsMap": {},
+  "storiesList": [],
+  "reelsList": [],
+  "notesList": [],
+  "conversationsList": [
+    {
+      "id": "conv_1793964717916_f9tx",
+      "isGroup": false,
+      "participants": [
+        {
+          "id": "u_owner_mohammad_siraj",
+          "username": "mohammadsiraj",
+          "displayName": "Mohammad Siraj",
+          "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+          "coverPhoto": "",
+          "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+          "location": "India",
+          "website": "https://yourbby.social/@mohammadsiraj",
+          "verified": true,
+          "role": "admin",
+          "followersCount": 0,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "badge": "Founder & Owner",
+          "privacy": "public",
+          "lastSeen": "2026-11-06T15:34:31.422Z",
+          "coverPhotoURL": ""
+        },
+        {
+          "id": "u_admin",
+          "username": "yourbby_hq",
+          "displayName": "YourBby Official",
+          "avatar": "/src/assets/images/yourbby_logo_mark_1793866710902.jpg",
+          "bio": "Official platform news, community guidelines, and global support for YourBby 🌐",
+          "location": "Global / India",
+          "verified": true,
+          "role": "admin",
+          "followersCount": 1,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "isFollowing": true,
+          "isFriend": false,
+          "privacy": "public",
+          "lastSeen": "2026-11-06T11:31:58.024Z"
+        }
+      ],
+      "participantIds": [
+        "u_owner_mohammad_siraj",
+        "u_admin"
+      ],
+      "unreadCount": 0,
+      "unreadCounts": {
+        "u_owner_mohammad_siraj": 0,
+        "u_admin": 4
+      },
+      "pinnedBy": [],
+      "mutedBy": [],
+      "archivedBy": [],
+      "deletedBy": [],
+      "typingUserIds": [],
+      "updatedAt": "2026-11-06T12:05:01.891Z",
+      "lastMessage": {
+        "id": "m_1793966701891_w5no",
+        "conversationId": "conv_1793964717916_f9tx",
+        "senderId": "u_owner_mohammad_siraj",
+        "sender": {
+          "id": "u_owner_mohammad_siraj",
+          "username": "mohammadsiraj",
+          "displayName": "Mohammad Siraj",
+          "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+          "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+          "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+          "location": "India",
+          "website": "https://yourbby.social/@mohammadsiraj",
+          "verified": true,
+          "role": "admin",
+          "followersCount": 0,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "badge": "Founder & Owner",
+          "privacy": "public",
+          "lastSeen": "2026-11-06T12:05:01.891Z"
+        },
+        "text": "Voice message",
+        "mediaUrl": "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwH/////////",
+        "mediaUrls": [
+          "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwH/////////"
+        ],
+        "mediaType": "voice",
+        "voiceDurationSeconds": 7,
+        "voiceWaveform": [
+          25,
+          48,
+          72,
+          60,
+          35,
+          80,
+          50,
+          30,
+          45,
+          68,
+          40,
+          22
+        ],
+        "createdAt": "2026-11-06T12:05:01.891Z",
+        "deliveredAt": "2026-11-06T12:05:01.891Z",
+        "status": "delivered",
+        "read": false,
+        "reactions": []
+      }
+    }
+  ],
+  "messagesMap": {
+    "conv_1793964717916_f9tx": [
+      {
+        "id": "m_1793964717944_6d2h",
+        "conversationId": "conv_1793964717916_f9tx",
+        "senderId": "u_admin",
+        "sender": {
+          "id": "u_admin",
+          "username": "yourbby_hq",
+          "displayName": "YourBby Official",
+          "avatar": "/src/assets/images/yourbby_logo_mark_1793866710902.jpg",
+          "bio": "Official platform news, community guidelines, and global support for YourBby 🌐",
+          "location": "Global / India",
+          "verified": true,
+          "role": "admin",
+          "followersCount": 1,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "isFollowing": true,
+          "isFriend": false,
+          "privacy": "public",
+          "lastSeen": "2026-11-06T11:31:57.944Z"
+        },
+        "text": "Welcome to YourBby Real-Time Messenger, Mohammad Siraj! Your end-to-end messaging, voice notes, media sharing, and WebRTC calling are live.",
+        "createdAt": "2026-11-06T11:31:57.944Z",
+        "deliveredAt": "2026-11-06T11:31:57.944Z",
+        "status": "read",
+        "read": true,
+        "reactions": [
+          {
+            "emoji": "🔥",
+            "userId": "u_owner_mohammad_siraj",
+            "userName": "Mohammad Siraj"
+          }
+        ],
+        "readAt": "2026-11-06T11:31:57.950Z"
+      },
+      {
+        "id": "m_1793966701874_ex5p",
+        "conversationId": "conv_1793964717916_f9tx",
+        "senderId": "u_owner_mohammad_siraj",
+        "sender": {
+          "id": "u_owner_mohammad_siraj",
+          "username": "mohammadsiraj",
+          "displayName": "Mohammad Siraj",
+          "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+          "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+          "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+          "location": "India",
+          "website": "https://yourbby.social/@mohammadsiraj",
+          "verified": true,
+          "role": "admin",
+          "followersCount": 0,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "badge": "Founder & Owner",
+          "privacy": "public",
+          "lastSeen": "2026-11-06T12:05:01.874Z"
+        },
+        "text": "Automated verification message",
+        "createdAt": "2026-11-06T12:05:01.874Z",
+        "deliveredAt": "2026-11-06T12:05:01.874Z",
+        "status": "delivered",
+        "read": false,
+        "reactions": []
+      },
+      {
+        "id": "m_1793966701880_ln45",
+        "conversationId": "conv_1793964717916_f9tx",
+        "senderId": "u_owner_mohammad_siraj",
+        "sender": {
+          "id": "u_owner_mohammad_siraj",
+          "username": "mohammadsiraj",
+          "displayName": "Mohammad Siraj",
+          "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+          "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+          "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+          "location": "India",
+          "website": "https://yourbby.social/@mohammadsiraj",
+          "verified": true,
+          "role": "admin",
+          "followersCount": 0,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "badge": "Founder & Owner",
+          "privacy": "public",
+          "lastSeen": "2026-11-06T12:05:01.880Z"
+        },
+        "text": "Photo attachment test",
+        "mediaUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+        "mediaUrls": [
+          "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        ],
+        "mediaType": "image",
+        "createdAt": "2026-11-06T12:05:01.880Z",
+        "deliveredAt": "2026-11-06T12:05:01.880Z",
+        "status": "delivered",
+        "read": false,
+        "reactions": []
+      },
+      {
+        "id": "m_1793966701886_5tjd",
+        "conversationId": "conv_1793964717916_f9tx",
+        "senderId": "u_owner_mohammad_siraj",
+        "sender": {
+          "id": "u_owner_mohammad_siraj",
+          "username": "mohammadsiraj",
+          "displayName": "Mohammad Siraj",
+          "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+          "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+          "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+          "location": "India",
+          "website": "https://yourbby.social/@mohammadsiraj",
+          "verified": true,
+          "role": "admin",
+          "followersCount": 0,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "badge": "Founder & Owner",
+          "privacy": "public",
+          "lastSeen": "2026-11-06T12:05:01.886Z"
+        },
+        "text": "Shared document: specification.pdf",
+        "mediaUrl": "data:application/pdf;base64,JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSPj4Kc3RyZWFtCkJUCjI0IDc1MCBUZAovRjEgMTIgVGYKKFlvdXJCYnkgVGVzdCBQREYpTjAKRVQKZW5kc3RyZWFtCmVuZG9iago=",
+        "mediaUrls": [
+          "data:application/pdf;base64,JVBERi0xLjQKJcOkw7zDtsOfCjIgMCBvYmoKPDwvTGVuZ3RoIDMgMCBSPj4Kc3RyZWFtCkJUCjI0IDc1MCBUZAovRjEgMTIgVGYKKFlvdXJCYnkgVGVzdCBQREYpTjAKRVQKZW5kc3RyZWFtCmVuZG9iago="
+        ],
+        "mediaType": "file",
+        "fileName": "specification.pdf",
+        "fileSize": 24576,
+        "createdAt": "2026-11-06T12:05:01.886Z",
+        "deliveredAt": "2026-11-06T12:05:01.886Z",
+        "status": "delivered",
+        "read": false,
+        "reactions": []
+      },
+      {
+        "id": "m_1793966701891_w5no",
+        "conversationId": "conv_1793964717916_f9tx",
+        "senderId": "u_owner_mohammad_siraj",
+        "sender": {
+          "id": "u_owner_mohammad_siraj",
+          "username": "mohammadsiraj",
+          "displayName": "Mohammad Siraj",
+          "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+          "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+          "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+          "location": "India",
+          "website": "https://yourbby.social/@mohammadsiraj",
+          "verified": true,
+          "role": "admin",
+          "followersCount": 0,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "badge": "Founder & Owner",
+          "privacy": "public",
+          "lastSeen": "2026-11-06T12:05:01.891Z"
+        },
+        "text": "Voice message",
+        "mediaUrl": "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwH/////////",
+        "mediaUrls": [
+          "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwH/////////"
+        ],
+        "mediaType": "voice",
+        "voiceDurationSeconds": 7,
+        "voiceWaveform": [
+          25,
+          48,
+          72,
+          60,
+          35,
+          80,
+          50,
+          30,
+          45,
+          68,
+          40,
+          22
+        ],
+        "createdAt": "2026-11-06T12:05:01.891Z",
+        "deliveredAt": "2026-11-06T12:05:01.891Z",
+        "status": "delivered",
+        "read": false,
+        "reactions": []
+      }
+    ]
+  },
+  "notificationsList": [
+    {
+      "id": "notif_msg_1793966701891_zf2",
+      "type": "message",
+      "actor": {
+        "id": "u_owner_mohammad_siraj",
+        "username": "mohammadsiraj",
+        "displayName": "Mohammad Siraj",
+        "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+        "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+        "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+        "location": "India",
+        "website": "https://yourbby.social/@mohammadsiraj",
+        "verified": true,
+        "role": "admin",
+        "followersCount": 0,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "badge": "Founder & Owner",
+        "privacy": "public",
+        "lastSeen": "2026-11-06T12:05:01.891Z"
+      },
+      "conversationId": "conv_1793964717916_f9tx",
+      "text": "sent you a voice message",
+      "createdAt": "2026-11-06T12:05:01.891Z",
+      "read": false
+    },
+    {
+      "id": "notif_msg_1793966701886_h28",
+      "type": "message",
+      "actor": {
+        "id": "u_owner_mohammad_siraj",
+        "username": "mohammadsiraj",
+        "displayName": "Mohammad Siraj",
+        "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+        "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+        "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+        "location": "India",
+        "website": "https://yourbby.social/@mohammadsiraj",
+        "verified": true,
+        "role": "admin",
+        "followersCount": 0,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "badge": "Founder & Owner",
+        "privacy": "public",
+        "lastSeen": "2026-11-06T12:05:01.886Z"
+      },
+      "conversationId": "conv_1793964717916_f9tx",
+      "text": "sent you a file",
+      "createdAt": "2026-11-06T12:05:01.886Z",
+      "read": false
+    },
+    {
+      "id": "notif_msg_1793966701880_62c",
+      "type": "message",
+      "actor": {
+        "id": "u_owner_mohammad_siraj",
+        "username": "mohammadsiraj",
+        "displayName": "Mohammad Siraj",
+        "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+        "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+        "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+        "location": "India",
+        "website": "https://yourbby.social/@mohammadsiraj",
+        "verified": true,
+        "role": "admin",
+        "followersCount": 0,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "badge": "Founder & Owner",
+        "privacy": "public",
+        "lastSeen": "2026-11-06T12:05:01.880Z"
+      },
+      "conversationId": "conv_1793964717916_f9tx",
+      "text": "sent you a image",
+      "createdAt": "2026-11-06T12:05:01.880Z",
+      "read": false
+    },
+    {
+      "id": "notif_msg_1793966701874_vxj",
+      "type": "message",
+      "actor": {
+        "id": "u_owner_mohammad_siraj",
+        "username": "mohammadsiraj",
+        "displayName": "Mohammad Siraj",
+        "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+        "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+        "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+        "location": "India",
+        "website": "https://yourbby.social/@mohammadsiraj",
+        "verified": true,
+        "role": "admin",
+        "followersCount": 0,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "badge": "Founder & Owner",
+        "privacy": "public",
+        "lastSeen": "2026-11-06T12:05:01.874Z"
+      },
+      "conversationId": "conv_1793964717916_f9tx",
+      "text": "sent you a message: \"Automated verification message\"",
+      "createdAt": "2026-11-06T12:05:01.874Z",
+      "read": false
+    },
+    {
+      "id": "notif_msg_1793964717945_u54",
+      "type": "message",
+      "actor": {
+        "id": "u_admin",
+        "username": "yourbby_hq",
+        "displayName": "YourBby Official",
+        "avatar": "/src/assets/images/yourbby_logo_mark_1793866710902.jpg",
+        "bio": "Official platform news, community guidelines, and global support for YourBby 🌐",
+        "location": "Global / India",
+        "verified": true,
+        "role": "admin",
+        "followersCount": 1,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "isFollowing": true,
+        "isFriend": false,
+        "privacy": "public",
+        "lastSeen": "2026-11-06T11:31:57.944Z"
+      },
+      "conversationId": "conv_1793964717916_f9tx",
+      "text": "sent you a message: \"Welcome to YourBby Real-Time Messenger, \"",
+      "createdAt": "2026-11-06T11:31:57.944Z",
+      "read": false
+    }
+  ],
+  "callsList": [
+    {
+      "id": "call_1793964718016_is9a",
+      "conversationId": "conv_1793964717916_f9tx",
+      "callerId": "u_owner_mohammad_siraj",
+      "caller": {
+        "id": "u_owner_mohammad_siraj",
+        "username": "mohammadsiraj",
+        "displayName": "Mohammad Siraj",
+        "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%23f43f5e\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">MS</text></svg>",
+        "coverPhoto": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80",
+        "bio": "Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.",
+        "location": "India",
+        "website": "https://yourbby.social/@mohammadsiraj",
+        "verified": true,
+        "role": "admin",
+        "followersCount": 0,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "badge": "Founder & Owner",
+        "privacy": "public",
+        "lastSeen": "2026-11-06T11:31:58.016Z"
+      },
+      "calleeId": "u_admin",
+      "callee": {
+        "id": "u_admin",
+        "username": "yourbby_hq",
+        "displayName": "YourBby Official",
+        "avatar": "/src/assets/images/yourbby_logo_mark_1793866710902.jpg",
+        "bio": "Official platform news, community guidelines, and global support for YourBby 🌐",
+        "location": "Global / India",
+        "verified": true,
+        "role": "admin",
+        "followersCount": 1,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "isFollowing": true,
+        "isFriend": false,
+        "privacy": "public",
+        "lastSeen": "2026-11-06T11:31:57.944Z"
+      },
+      "type": "video",
+      "status": "ended",
+      "startedAt": "2026-11-06T11:31:58.016Z",
+      "offer": {
+        "type": "offer",
+        "sdp": "v=0..."
+      },
+      "answer": {
+        "type": "answer",
+        "sdp": "v=0..."
+      },
+      "callerCandidates": [],
+      "calleeCandidates": [],
+      "connectedAt": "2026-11-06T11:31:58.024Z",
+      "endedAt": "2026-11-06T11:31:58.029Z",
+      "durationSeconds": 1
+    }
+  ],
+  "creatorAnalytics": {
+    "reach": 0,
+    "impressions": 0,
+    "followersGrowth": 0,
+    "engagementRate": 0,
+    "reelViews": 0,
+    "estimatedEarningsINR": 0,
+    "chartData": [
+      {
+        "date": "Mon",
+        "views": 0,
+        "interactions": 0
+      },
+      {
+        "date": "Tue",
+        "views": 0,
+        "interactions": 0
+      },
+      {
+        "date": "Wed",
+        "views": 0,
+        "interactions": 0
+      },
+      {
+        "date": "Thu",
+        "views": 0,
+        "interactions": 0
+      },
+      {
+        "date": "Fri",
+        "views": 0,
+        "interactions": 0
+      },
+      {
+        "date": "Sat",
+        "views": 0,
+        "interactions": 0
+      },
+      {
+        "date": "Sun",
+        "views": 0,
+        "interactions": 0
+      }
+    ]
+  },
+  "contentReports": [],
+  "updatedAt": "2026-11-06T15:34:31.422Z"
+}

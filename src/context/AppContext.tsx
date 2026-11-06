@@ -1,4 +1,7 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, orderBy, setDoc } from 'firebase/firestore';
+import { db, auth, compressImageDataUrl, sanitizeUserForFirestore } from '../firebase/config.ts';
+import { apiFetch } from '../firebase/staticApiFallback.ts';
 import type {
   User,
   Post,
@@ -8,6 +11,7 @@ import type {
   Note,
   Conversation,
   Message,
+  CallSession,
   Group,
   SocialEvent,
   NotificationItem,
@@ -17,6 +21,15 @@ import type {
   ReactionType,
   SupportedLanguage
 } from '../types/index.ts';
+
+export interface SendMessageOptions {
+  mediaUrls?: string[];
+  fileName?: string;
+  fileSize?: number;
+  voiceDurationSeconds?: number;
+  voiceWaveform?: number[];
+  replyTo?: Message['replyTo'];
+}
 
 interface AppContextType {
   // Theme & Language
@@ -31,10 +44,17 @@ interface AppContextType {
   setActiveTab: (tab: string) => void;
   viewingProfileUsername: string | null;
   setViewingProfileUsername: (username: string | null) => void;
+  activeSettingsSection: string;
+  setActiveSettingsSection: (section: string) => void;
 
-  // Current User
+  // Current User & Accounts
   currentUser: User | null;
+  allUsers: User[];
   updateCurrentUserProfile: (data: Partial<User>) => Promise<void>;
+  switchUserAccount: (userId: string) => Promise<void>;
+  registerUserAccount: (data: Partial<User>) => Promise<User>;
+  blockedUserIds: string[];
+  toggleBlockUser: (userId: string) => void;
 
   // Feed & Posts
   posts: Post[];
@@ -51,6 +71,7 @@ interface AppContextType {
   // Stories
   stories: Story[];
   createStory: (storyData: any) => Promise<void>;
+  deleteStory: (storyId: string) => Promise<void>;
   activeStoryIndex: number | null;
   setActiveStoryIndex: (index: number | null) => void;
   markStorySeen: (storyId: string) => Promise<void>;
@@ -71,13 +92,36 @@ interface AppContextType {
   activeConversation: Conversation | null;
   setActiveConversation: (conv: Conversation | null) => void;
   activeConversationMessages: Message[];
-  sendMessage: (convId: string, text: string, mediaUrl?: string, mediaType?: 'image' | 'video' | 'voice' | 'file') => Promise<void>;
-  startChatWithUser: (user: User) => void;
+  totalUnreadMessagesCount: number;
+  sendMessage: (
+    convId: string,
+    text: string,
+    mediaUrl?: string,
+    mediaType?: 'image' | 'video' | 'voice' | 'file',
+    options?: SendMessageOptions
+  ) => Promise<Message | null>;
+  editMessage: (convId: string, msgId: string, newText: string) => Promise<void>;
+  deleteMessage: (convId: string, msgId: string) => Promise<void>;
+  reactToMessage: (convId: string, msgId: string, emoji: string) => Promise<void>;
+  setTypingStatus: (convId: string, isTyping: boolean) => Promise<void>;
+  togglePinConversation: (convId: string) => Promise<void>;
+  toggleMuteConversation: (convId: string) => Promise<void>;
+  toggleArchiveConversation: (convId: string) => Promise<void>;
+  deleteConversation: (convId: string) => Promise<void>;
+  startChatWithUser: (user: User) => Promise<Conversation | null>;
 
-  // Call simulator
-  activeCall: { user: User; type: 'video' | 'audio'; isIncoming?: boolean } | null;
-  startCall: (user: User, type: 'video' | 'audio') => void;
-  endCall: () => void;
+  // Real-Time WebRTC Voice & Video Calling
+  activeCall: {
+    user: User;
+    type: 'video' | 'audio';
+    isIncoming?: boolean;
+    callSession?: CallSession;
+  } | null;
+  callHistory: CallSession[];
+  startCall: (user: User, type: 'video' | 'audio', conversationId?: string) => Promise<void>;
+  acceptCall: () => Promise<void>;
+  rejectCall: () => Promise<void>;
+  endCall: () => Promise<void>;
 
   // Groups & Events
   groups: Group[];
@@ -116,7 +160,6 @@ interface AppContextType {
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
-// Simple dictionary for translations
 const translations: Record<SupportedLanguage, Record<string, string>> = {
   en: {
     home: 'Home',
@@ -148,6 +191,12 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
     suggestedForYou: 'Suggested for you',
     follow: 'Follow',
     viewAll: 'View all',
+    createStory: 'Create story',
+    yourStory: 'Your story',
+    photos: 'Photos',
+    videos: 'Videos',
+    about: 'About',
+    editProfile: 'Edit Profile',
   },
   hi: {
     home: 'होम',
@@ -179,6 +228,12 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
     suggestedForYou: 'आपके लिए सुझाव',
     follow: 'फॉलो करें',
     viewAll: 'सभी देखें',
+    createStory: 'स्टोरी बनाएं',
+    yourStory: 'आपकी स्टोरी',
+    photos: 'फ़ोटो',
+    videos: 'वीडियो',
+    about: 'परिचय',
+    editProfile: 'प्रोफ़ाइल संपादित करें',
   },
   bn: {
     home: 'হোম',
@@ -210,18 +265,22 @@ const translations: Record<SupportedLanguage, Record<string, string>> = {
     suggestedForYou: 'আপনার জন্য প্রস্তাবিত',
     follow: 'অনুসরণ',
     viewAll: 'সব দেখুন',
+    createStory: 'স্টোরি তৈরি করুন',
+    yourStory: 'আপনার স্টোরি',
+    photos: 'ছবি',
+    videos: 'ভিডিও',
+    about: 'সম্পর্কে',
+    editProfile: 'প্রোফাইল সম্পাদনা',
   }
 };
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Theme state
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     const saved = localStorage.getItem('yourbby_theme');
     if (saved === 'dark' || saved === 'light') return saved;
-    return 'dark'; // Default to modern sleek dark mode
+    return 'dark';
   });
 
-  // Language state
   const [language, setLanguageState] = useState<SupportedLanguage>(() => {
     const saved = localStorage.getItem('yourbby_lang') as SupportedLanguage;
     return saved || 'en';
@@ -236,7 +295,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return translations[language]?.[key] || translations.en[key] || key;
   };
 
-  // Sync theme with DOM documentElement
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'dark') {
@@ -254,9 +312,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Navigation tab
   const [activeTab, setActiveTab] = useState<string>('feed');
   const [viewingProfileUsername, setViewingProfileUsername] = useState<string | null>(null);
+  const [activeSettingsSection, setActiveSettingsSection] = useState<string>('account');
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('yourbby_blocked_users');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const toggleBlockUser = (userId: string) => {
+    setBlockedUserIds(prev => {
+      const next = prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId];
+      localStorage.setItem('yourbby_blocked_users', JSON.stringify(next));
+      return next;
+    });
+  };
 
   // Data states
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [posts, setPosts] = useState<Post[]>([]);
   const [feedType, setFeedType] = useState<'for-you' | 'following' | 'friends' | 'latest'>('for-you');
   const [stories, setStories] = useState<Story[]>([]);
@@ -267,6 +343,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<Conversation | null>(null);
   const [activeConversationMessages, setActiveConversationMessages] = useState<Message[]>([]);
+  const [callHistory, setCallHistory] = useState<CallSession[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [events, setEvents] = useState<SocialEvent[]>([]);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
@@ -279,54 +356,318 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [createModalInitialTab, setCreateModalInitialTab] = useState<'post' | 'story' | 'reel' | 'live' | 'note'>('post');
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [activeCall, setActiveCall] = useState<{ user: User; type: 'video' | 'audio'; isIncoming?: boolean } | null>(null);
+  const [activeCall, setActiveCall] = useState<{
+    user: User;
+    type: 'video' | 'audio';
+    isIncoming?: boolean;
+    callSession?: CallSession;
+  } | null>(null);
+
+  const lastNotifiedMessageIdRef = useRef<string | null>(null);
+  const activeConversationRef = useRef<Conversation | null>(null);
+  activeConversationRef.current = activeConversation;
 
   const openCreateModal = (tab: 'post' | 'story' | 'reel' | 'live' | 'note' = 'post') => {
     setCreateModalInitialTab(tab);
     setIsCreateModalOpen(true);
   };
 
-  // Fetch initial data
-  useEffect(() => {
-    async function loadData() {
+  // Load all initial data
+  const loadAllData = useCallback(async () => {
+    try {
+      const [
+        meRes,
+        usersRes,
+        feedRes,
+        storiesRes,
+        reelsRes,
+        notesRes,
+        convsRes,
+        callsRes,
+        groupsRes,
+        eventsRes,
+        notifsRes,
+        liveRes,
+        anaRes,
+        adminRes
+      ] = await Promise.all([
+        apiFetch('/api/me').then(r => r.json()),
+        apiFetch('/api/users').then(r => r.json()),
+        apiFetch('/api/feed?type=for-you').then(r => r.json()),
+        apiFetch('/api/stories').then(r => r.json()),
+        apiFetch('/api/reels').then(r => r.json()),
+        apiFetch('/api/notes').then(r => r.json()),
+        apiFetch('/api/messages/conversations').then(r => r.json()),
+        apiFetch('/api/calls').then(r => r.json()).catch(() => ({ success: false })),
+        apiFetch('/api/groups').then(r => r.json()),
+        apiFetch('/api/events').then(r => r.json()),
+        apiFetch('/api/notifications').then(r => r.json()),
+        apiFetch('/api/live').then(r => r.json()),
+        apiFetch('/api/analytics').then(r => r.json()),
+        apiFetch('/api/admin/overview').then(r => r.json()),
+      ]);
+
+      // Merge saved Firestore user profiles (including coverPhotoURL) on boot, refresh, and login
+      const firestoreUsersMap = new Map<string, Partial<User>>();
       try {
-        const [meRes, feedRes, storiesRes, reelsRes, notesRes, convsRes, groupsRes, eventsRes, notifsRes, liveRes, anaRes, adminRes] = await Promise.all([
-          fetch('/api/me').then(r => r.json()),
-          fetch('/api/feed?type=for-you').then(r => r.json()),
-          fetch('/api/stories').then(r => r.json()),
-          fetch('/api/reels').then(r => r.json()),
-          fetch('/api/notes').then(r => r.json()),
-          fetch('/api/messages/conversations').then(r => r.json()),
-          fetch('/api/groups').then(r => r.json()),
-          fetch('/api/events').then(r => r.json()),
-          fetch('/api/notifications').then(r => r.json()),
-          fetch('/api/live').then(r => r.json()),
-          fetch('/api/analytics').then(r => r.json()),
-          fetch('/api/admin/overview').then(r => r.json()),
+        const snap = await getDocs(collection(db, 'users'));
+        snap.forEach(d => {
+          const data = d.data() as Partial<User>;
+          const id = data.id || d.id;
+          const resolvedCover =
+            data.coverPhotoURL !== undefined ? data.coverPhotoURL : data.coverPhoto;
+          firestoreUsersMap.set(id, {
+            ...data,
+            id,
+            ...(resolvedCover !== undefined
+              ? { coverPhotoURL: resolvedCover, coverPhoto: resolvedCover }
+              : {})
+          });
+        });
+      } catch (fsErr) {
+        console.warn('Firestore users load notice:', fsErr);
+      }
+
+      if (meRes.success && meRes.user) {
+        const fsMe = firestoreUsersMap.get(meRes.user.id);
+        const mergedMe: User = fsMe ? { ...meRes.user, ...fsMe } : meRes.user;
+        let resolvedCover =
+          mergedMe.coverPhotoURL !== undefined
+            ? mergedMe.coverPhotoURL
+            : (mergedMe.coverPhoto ?? '');
+
+        let needsCompactSync = false;
+        if (
+          typeof mergedMe.avatar === 'string' &&
+          mergedMe.avatar.startsWith('data:image/') &&
+          mergedMe.avatar.length > 120000
+        ) {
+          mergedMe.avatar = await compressImageDataUrl(mergedMe.avatar, 320, 320, 110000);
+          needsCompactSync = true;
+        }
+        if (
+          typeof resolvedCover === 'string' &&
+          resolvedCover.startsWith('data:image/') &&
+          resolvedCover.length > 240000
+        ) {
+          resolvedCover = await compressImageDataUrl(resolvedCover, 1200, 400, 220000);
+          needsCompactSync = true;
+        }
+
+        mergedMe.coverPhotoURL = resolvedCover;
+        mergedMe.coverPhoto = resolvedCover;
+        setCurrentUser(mergedMe);
+        sessionStorage.setItem('yourbby_active_user_id', mergedMe.id);
+
+        // Ensure backend memory/disk is in sync if Firestore had a newer coverPhotoURL or legacy image was compacted
+        if (
+          needsCompactSync ||
+          (fsMe && fsMe.coverPhotoURL !== undefined && fsMe.coverPhotoURL !== meRes.user.coverPhoto)
+        ) {
+          apiFetch('/api/me', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              avatar: mergedMe.avatar,
+              coverPhotoURL: resolvedCover,
+              coverPhoto: resolvedCover
+            })
+          }).catch(() => {});
+        }
+      }
+
+      if (usersRes.success) {
+        const mergedUsers = (usersRes.users || []).map((u: User) => {
+          const fsU = firestoreUsersMap.get(u.id);
+          const merged = fsU ? { ...u, ...fsU } : u;
+          const resolvedCover =
+            merged.coverPhotoURL !== undefined ? merged.coverPhotoURL : (merged.coverPhoto ?? '');
+          return {
+            ...merged,
+            coverPhotoURL: resolvedCover,
+            coverPhoto: resolvedCover
+          };
+        });
+        setAllUsers(mergedUsers);
+      }
+      if (feedRes.success) setPosts(feedRes.posts);
+      if (storiesRes.success) setStories(storiesRes.stories);
+      if (reelsRes.success) setReels(reelsRes.reels);
+      if (notesRes.success) setNotes(notesRes.notes);
+      if (convsRes.success) {
+        const convList: Conversation[] = convsRes.conversations || [];
+        setConversations(convList);
+        if ( convList.length > 0 && convList[0].lastMessage ) {
+          lastNotifiedMessageIdRef.current = convList[0].lastMessage.id;
+        }
+      }
+      if (callsRes.success && Array.isArray(callsRes.calls)) {
+        setCallHistory(callsRes.calls);
+      }
+      if (groupsRes.success) setGroups(groupsRes.groups);
+      if (eventsRes.success) setEvents(eventsRes.events);
+      if (notifsRes.success) setNotifications(notifsRes.notifications);
+      if (liveRes.success) setLiveStream(liveRes.liveStream);
+      if (anaRes.success) setAnalytics(anaRes.analytics);
+      if (adminRes.success) setAdminOverview(adminRes);
+    } catch (err) {
+      console.error('Initial load error:', err);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadAllData();
+  }, [loadAllData]);
+
+  // Real-time synchronization loop for conversations, active chat messages, presence, and incoming calls
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const [convsRes, usersRes, callsRes] = await Promise.all([
+          apiFetch('/api/messages/conversations').then(r => r.json()).catch(() => ({ success: false })),
+          apiFetch('/api/users').then(r => r.json()).catch(() => ({ success: false })),
+          apiFetch('/api/calls').then(r => r.json()).catch(() => ({ success: false }))
         ]);
 
-        if (meRes.success) setCurrentUser(meRes.user);
-        if (feedRes.success) setPosts(feedRes.posts);
-        if (storiesRes.success) setStories(storiesRes.stories);
-        if (reelsRes.success) setReels(reelsRes.reels);
-        if (notesRes.success) setNotes(notesRes.notes);
-        if (convsRes.success) setConversations(convsRes.conversations);
-        if (groupsRes.success) setGroups(groupsRes.groups);
-        if (eventsRes.success) setEvents(eventsRes.events);
-        if (notifsRes.success) setNotifications(notifsRes.notifications);
-        if (liveRes.success) setLiveStream(liveRes.liveStream);
-        if (anaRes.success) setAnalytics(anaRes.analytics);
-        if (adminRes.success) setAdminOverview(adminRes);
-      } catch (err) {
-        console.error('Initial load error:', err);
-      }
+        if (usersRes.success && Array.isArray(usersRes.users)) {
+          setAllUsers(prev =>
+            usersRes.users.map((u: User) => {
+              const existing = prev.find(p => p.id === u.id);
+              const resolvedCover =
+                u.coverPhotoURL !== undefined
+                  ? u.coverPhotoURL
+                  : (u.coverPhoto ?? existing?.coverPhotoURL ?? existing?.coverPhoto ?? '');
+              return {
+                ...u,
+                coverPhotoURL: resolvedCover,
+                coverPhoto: resolvedCover
+              };
+            })
+          );
+        }
+
+        if (convsRes.success && Array.isArray(convsRes.conversations)) {
+          const updatedConvs: Conversation[] = convsRes.conversations;
+          setConversations(updatedConvs);
+
+          // Update activeConversation metadata (e.g., typingUserIds, online status, mute/pin state)
+          const currentActive = activeConversationRef.current;
+          if (currentActive) {
+            const matched = updatedConvs.find(c => c.id === currentActive.id);
+            if (matched) {
+              setActiveConversation(matched);
+            }
+          }
+
+          // Check for new incoming message to trigger browser notification if not muted
+          const newestWithUnread = updatedConvs.find(
+            c => c.unreadCount > 0 && c.lastMessage && c.lastMessage.senderId !== currentUser.id
+          );
+          if (
+            newestWithUnread &&
+            newestWithUnread.lastMessage &&
+            newestWithUnread.lastMessage.id !== lastNotifiedMessageIdRef.current
+          ) {
+            lastNotifiedMessageIdRef.current = newestWithUnread.lastMessage.id;
+            const notificationsEnabled = localStorage.getItem('yourbby_msg_notifications') !== 'false';
+            if (
+              notificationsEnabled &&
+              !newestWithUnread.isMuted &&
+              typeof window !== 'undefined' &&
+              'Notification' in window &&
+              Notification.permission === 'granted'
+            ) {
+              try {
+                new Notification(`New message from ${newestWithUnread.lastMessage.sender.displayName}`, {
+                  body: newestWithUnread.lastMessage.text || 'Sent an attachment',
+                  icon: newestWithUnread.lastMessage.sender.avatar
+                });
+              } catch (_) {}
+            }
+          }
+        }
+
+        // Sync active conversation messages
+        const currentActive = activeConversationRef.current;
+        if (currentActive) {
+          const msgRes = await apiFetch(`/api/messages/conversations/${currentActive.id}`).then(r => r.json()).catch(() => ({ success: false }));
+          if (msgRes.success && Array.isArray(msgRes.messages)) {
+            setActiveConversationMessages(msgRes.messages);
+          }
+        }
+
+        // Check incoming WebRTC call or call history updates
+        if (callsRes.success) {
+          if (Array.isArray(callsRes.calls)) {
+            setCallHistory(callsRes.calls);
+          }
+          if (callsRes.incomingCall && !activeCall) {
+            const inc: CallSession = callsRes.incomingCall;
+            setActiveCall({
+              user: inc.caller,
+              type: inc.type,
+              isIncoming: true,
+              callSession: inc
+            });
+          }
+        }
+      } catch (_) {}
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [currentUser, activeCall]);
+
+  // Firestore real-time listener when activeConversation is selected and Firebase Auth is active
+  useEffect(() => {
+    if (!activeConversation) {
+      setActiveConversationMessages([]);
+      return;
     }
-    loadData();
-  }, []);
+
+    apiFetch(`/api/messages/conversations/${activeConversation.id}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.messages)) {
+          setActiveConversationMessages(data.messages);
+          setConversations(prev =>
+            prev.map(c => (c.id === activeConversation.id ? { ...c, unreadCount: 0 } : c))
+          );
+        }
+      })
+      .catch(console.error);
+
+    if (auth.currentUser) {
+      const q = query(
+        collection(db, 'conversations', activeConversation.id, 'messages'),
+        orderBy('createdAt', 'asc')
+      );
+      const unsub = onSnapshot(
+        q,
+        snap => {
+          if (!snap.empty) {
+            const fsMsgs: Message[] = [];
+            snap.forEach(d => fsMsgs.push(d.data() as Message));
+            setActiveConversationMessages(prev => {
+              const map = new Map<string, Message>();
+              prev.forEach(m => map.set(m.id, m));
+              fsMsgs.forEach(m => map.set(m.id, m));
+              return Array.from(map.values()).sort(
+                (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+              );
+            });
+          }
+        },
+        () => {}
+      );
+      return () => unsub();
+    }
+  }, [activeConversation?.id]);
 
   // Reload feed on feedType change
   useEffect(() => {
-    fetch(`/api/feed?type=${feedType}`)
+    apiFetch(`/api/feed?type=${feedType}`)
       .then(r => r.json())
       .then(data => {
         if (data.success) setPosts(data.posts);
@@ -334,42 +675,146 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .catch(console.error);
   }, [feedType]);
 
-  // Load messages when active conversation changes
-  useEffect(() => {
-    if (!activeConversation) {
-      setActiveConversationMessages([]);
-      return;
-    }
-    fetch(`/api/messages/conversations/${activeConversation.id}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.success) {
-          setActiveConversationMessages(data.messages);
-        }
-      })
-      .catch(console.error);
-  }, [activeConversation]);
-
-  // Profile update
+  // Profile update — One User, One Profile canonical state propagation + Firestore persistence
   const updateCurrentUserProfile = async (data: Partial<User>) => {
-    try {
-      const res = await fetch('/api/me', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      const json = await res.json();
-      if (json.success) {
-        setCurrentUser(json.user);
-      }
-    } catch (err) {
-      console.error(err);
+    const payload: Partial<User> = { ...data };
+
+    // Compress avatar if it is an oversized Data URL
+    if (
+      typeof payload.avatar === 'string' &&
+      payload.avatar.startsWith('data:image/') &&
+      payload.avatar.length > 120000
+    ) {
+      payload.avatar = await compressImageDataUrl(payload.avatar, 320, 320, 110000);
     }
+
+    if (payload.coverPhotoURL !== undefined || payload.coverPhoto !== undefined) {
+      let resolvedCover =
+        payload.coverPhotoURL !== undefined ? payload.coverPhotoURL : payload.coverPhoto;
+      if (
+        typeof resolvedCover === 'string' &&
+        resolvedCover.startsWith('data:image/') &&
+        resolvedCover.length > 240000
+      ) {
+        resolvedCover = await compressImageDataUrl(resolvedCover, 1200, 400, 220000);
+      }
+      payload.coverPhotoURL = resolvedCover ?? '';
+      payload.coverPhoto = resolvedCover ?? '';
+    }
+
+    const res = await apiFetch('/api/me', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success || !json.user) {
+      throw new Error(json.error || 'Failed to update profile');
+    }
+
+    const updatedUser: User = {
+      ...json.user,
+      coverPhotoURL:
+        json.user.coverPhotoURL !== undefined
+          ? json.user.coverPhotoURL
+          : (json.user.coverPhoto ?? ''),
+      coverPhoto:
+        json.user.coverPhoto !== undefined
+          ? json.user.coverPhoto
+          : (json.user.coverPhotoURL ?? '')
+    };
+
+    // Persist to Firestore users/{userId} document with sanitized size (< 1 MiB) and dedicated coverPhotoURL field
+    const targetDocId = updatedUser.id;
+    const firestorePayload = await sanitizeUserForFirestore(updatedUser);
+    await setDoc(doc(db, 'users', targetDocId), firestorePayload, { merge: true });
+
+    // If sanitizeUserForFirestore compressed a legacy oversized avatar or coverPhotoURL in currentUser, sync it
+    if (typeof firestorePayload.avatar === 'string') {
+      updatedUser.avatar = firestorePayload.avatar;
+    }
+    if (typeof firestorePayload.coverPhotoURL === 'string') {
+      updatedUser.coverPhotoURL = firestorePayload.coverPhotoURL;
+      updatedUser.coverPhoto = firestorePayload.coverPhotoURL;
+    }
+
+    // Verify Firestore document update
+    const verifySnap = await getDoc(doc(db, 'users', targetDocId));
+    if (verifySnap.exists()) {
+      const fsUser = verifySnap.data() as User;
+      if (fsUser.coverPhotoURL !== undefined) {
+        updatedUser.coverPhotoURL = fsUser.coverPhotoURL;
+        updatedUser.coverPhoto = fsUser.coverPhotoURL;
+      }
+    }
+
+    setCurrentUser(updatedUser);
+    setAllUsers(prev => prev.map(u => (u.id === updatedUser.id ? updatedUser : u)));
+    setPosts(prev =>
+      prev.map(p =>
+        p.authorId === updatedUser.id || p.author.id === updatedUser.id
+          ? { ...p, author: updatedUser }
+          : p
+      )
+    );
+    setStories(prev =>
+      prev.map(s => (s.author.id === updatedUser.id ? { ...s, author: updatedUser } : s))
+    );
+    setReels(prev =>
+      prev.map(r => (r.author.id === updatedUser.id ? { ...r, author: updatedUser } : r))
+    );
+    setConversations(prev =>
+      prev.map(c => ({
+        ...c,
+        participants: c.participants.map(p => (p.id === updatedUser.id ? updatedUser : p)),
+      }))
+    );
+  };
+
+  // Switch between real accounts (e.g. Owner Mohammad Siraj vs Second User Account)
+  const switchUserAccount = async (userId: string) => {
+    sessionStorage.setItem('yourbby_active_user_id', userId);
+    localStorage.setItem('yourbby_active_user_id', userId);
+    const res = await apiFetch('/api/auth/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
+      body: JSON.stringify({ userId })
+    });
+    const data = await res.json();
+    if (data.success && data.user) {
+      setCurrentUser(data.user);
+      setActiveConversation(null);
+      setActiveConversationMessages([]);
+      await loadAllData();
+    }
+  };
+
+  // Register a new persistent user account
+  const registerUserAccount = async (userData: Partial<User>): Promise<User> => {
+    const res = await apiFetch('/api/users/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(userData)
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Failed to register user account');
+    }
+    sessionStorage.setItem('yourbby_active_user_id', data.user.id);
+    localStorage.setItem('yourbby_active_user_id', data.user.id);
+    setCurrentUser(data.user);
+    if (Array.isArray(data.users)) {
+      setAllUsers(data.users);
+    }
+    setActiveConversation(null);
+    setActiveConversationMessages([]);
+    await loadAllData();
+    return data.user;
   };
 
   // Posts operations
   const createPost = async (postData: any): Promise<Post> => {
-    const res = await fetch('/api/posts', {
+    const res = await apiFetch('/api/posts', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(postData),
@@ -383,7 +828,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const reactToPost = async (postId: string, reaction: ReactionType | null) => {
-    // Optimistic update
     setPosts(prev => prev.map(p => {
       if (p.id !== postId) return p;
       const prevReaction = p.userReaction;
@@ -409,7 +853,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }));
 
     try {
-      await fetch(`/api/posts/${postId}/react`, {
+      await apiFetch(`/api/posts/${postId}/react`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reaction }),
@@ -422,7 +866,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const bookmarkPost = async (postId: string) => {
     setPosts(prev => prev.map(p => p.id === postId ? { ...p, isBookmarked: !p.isBookmarked } : p));
     try {
-      await fetch(`/api/posts/${postId}/bookmark`, { method: 'POST' });
+      await apiFetch(`/api/posts/${postId}/bookmark`, { method: 'POST' });
     } catch (err) {
       console.error(err);
     }
@@ -431,7 +875,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const deletePost = async (postId: string) => {
     setPosts(prev => prev.filter(p => p.id !== postId));
     try {
-      await fetch(`/api/posts/${postId}`, { method: 'DELETE' });
+      await apiFetch(`/api/posts/${postId}`, { method: 'DELETE' });
     } catch (err) {
       console.error(err);
     }
@@ -440,7 +884,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const votePoll = async (postId: string, optionId: string) => {
     if (!currentUser) return;
     try {
-      const res = await fetch(`/api/posts/${postId}/poll-vote`, {
+      const res = await apiFetch(`/api/posts/${postId}/poll-vote`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ optionId }),
@@ -456,7 +900,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addComment = async (postId: string, text: string, replyToId?: string) => {
     try {
-      const res = await fetch(`/api/posts/${postId}/comments`, {
+      const res = await apiFetch(`/api/posts/${postId}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, replyToId }),
@@ -472,7 +916,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const getCommentsForPost = async (postId: string): Promise<Comment[]> => {
     try {
-      const res = await fetch(`/api/posts/${postId}/comments`);
+      const res = await apiFetch(`/api/posts/${postId}/comments`);
       const data = await res.json();
       return data.success ? data.comments : [];
     } catch (err) {
@@ -483,25 +927,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Stories
   const createStory = async (storyData: any) => {
-    const res = await fetch('/api/stories', {
+    const res = await apiFetch('/api/stories', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(storyData),
     });
     const data = await res.json();
-    if (data.success) {
+    if (data.success && data.story) {
       setStories(prev => [data.story, ...prev]);
+      if (auth.currentUser) {
+        setDoc(doc(db, 'stories', data.story.id), data.story, { merge: true }).catch(() => {});
+      }
+    }
+  };
+
+  const deleteStory = async (storyId: string) => {
+    setStories(prev => prev.filter(s => s.id !== storyId));
+    try {
+      await apiFetch(`/api/stories/${storyId}`, { method: 'DELETE' });
+    } catch (err) {
+      console.error(err);
     }
   };
 
   const markStorySeen = async (storyId: string) => {
-    setStories(prev => prev.map(s => s.id === storyId ? { ...s, seen: true } : s));
-    fetch(`/api/stories/${storyId}/view`, { method: 'POST' }).catch(console.error);
+    setStories(prev =>
+      prev.map(s => {
+        if (s.id !== storyId) return s;
+        const viewerIds = Array.isArray(s.viewerIds) ? [...s.viewerIds] : [];
+        const viewers = Array.isArray(s.viewers) ? [...s.viewers] : [];
+        if (currentUser && !viewerIds.includes(currentUser.id)) {
+          viewerIds.push(currentUser.id);
+          viewers.unshift({
+            id: currentUser.id,
+            displayName: currentUser.displayName,
+            username: currentUser.username,
+            avatar: currentUser.avatar,
+            viewedAt: new Date().toISOString(),
+          });
+        }
+        return {
+          ...s,
+          seen: true,
+          viewerIds,
+          viewers,
+          viewsCount: Math.max(s.viewsCount + (s.seen ? 0 : 1), viewerIds.length),
+        };
+      })
+    );
+    apiFetch(`/api/stories/${storyId}/view`, { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (data?.success && data.story) {
+          setStories(prev => prev.map(s => (s.id === storyId ? data.story : s)));
+        }
+      })
+      .catch(() => {});
   };
 
   // Reels
   const createReel = async (reelData: any) => {
-    const res = await fetch('/api/reels', {
+    const res = await apiFetch('/api/reels', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(reelData),
@@ -522,12 +1008,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         likesCount: r.likesCount + (nextLiked ? 1 : -1)
       };
     }));
-    fetch(`/api/reels/${reelId}/like`, { method: 'POST' }).catch(console.error);
+    apiFetch(`/api/reels/${reelId}/like`, { method: 'POST' }).catch(console.error);
   };
 
   // Notes
   const createNote = async (text: string, musicSnippet?: string) => {
-    const res = await fetch('/api/notes', {
+    const res = await apiFetch('/api/notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, musicSnippet }),
@@ -538,48 +1024,317 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Messages
-  const sendMessage = async (convId: string, text: string, mediaUrl?: string, mediaType?: 'image' | 'video' | 'voice' | 'file') => {
-    const res = await fetch(`/api/messages/conversations/${convId}/send`, {
+  // -------------------------------------------------------------
+  // Complete Real-Time Messaging Operations
+  // -------------------------------------------------------------
+  const totalUnreadMessagesCount = conversations.reduce(
+    (sum, c) => sum + (c.isArchived ? 0 : c.unreadCount || 0),
+    0
+  );
+
+  const sendMessage = async (
+    convId: string,
+    text: string,
+    mediaUrl?: string,
+    mediaType?: 'image' | 'video' | 'voice' | 'file',
+    options?: SendMessageOptions
+  ): Promise<Message | null> => {
+    const res = await apiFetch(`/api/messages/conversations/${convId}/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, mediaUrl, mediaType }),
+      body: JSON.stringify({
+        text,
+        mediaUrl,
+        mediaType,
+        mediaUrls: options?.mediaUrls,
+        fileName: options?.fileName,
+        fileSize: options?.fileSize,
+        voiceDurationSeconds: options?.voiceDurationSeconds,
+        voiceWaveform: options?.voiceWaveform,
+        replyTo: options?.replyTo
+      }),
     });
     const data = await res.json();
-    if (data.success) {
-      setActiveConversationMessages(prev => [...prev, data.message]);
-      setConversations(prev => prev.map(c => c.id === convId ? { ...c, lastMessage: data.message, updatedAt: data.message.createdAt } : c));
+    if (data.success && data.message) {
+      const msg: Message = data.message;
+      setActiveConversationMessages(prev => {
+        if (prev.some(m => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
+      setConversations(prev => {
+        const exists = prev.some(c => c.id === convId);
+        if (!exists && data.conversation) {
+          return [data.conversation, ...prev];
+        }
+        return prev.map(c =>
+          c.id === convId
+            ? { ...(data.conversation || c), lastMessage: msg, updatedAt: msg.createdAt }
+            : c
+        );
+      });
+
+      // Mirror to Firestore if signed in
+      if (auth.currentUser) {
+        const targetConv = conversations.find(c => c.id === convId) || data.conversation;
+        if (targetConv) {
+          setDoc(doc(db, 'conversations', convId), targetConv, { merge: true }).catch(() => {});
+        }
+        setDoc(doc(db, 'conversations', convId, 'messages', msg.id), msg, { merge: true }).catch(() => {});
+      }
+
+      return msg;
+    }
+    return null;
+  };
+
+  const editMessage = async (convId: string, msgId: string, newText: string) => {
+    const res = await apiFetch(`/api/messages/${convId}/${msgId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: newText }),
+    });
+    const data = await res.json();
+    if (data.success && data.message) {
+      setActiveConversationMessages(prev =>
+        prev.map(m => (m.id === msgId ? data.message : m))
+      );
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === convId && c.lastMessage?.id === msgId
+            ? { ...c, lastMessage: data.message }
+            : c
+        )
+      );
+      if (auth.currentUser) {
+        setDoc(doc(db, 'conversations', convId, 'messages', msgId), data.message, { merge: true }).catch(() => {});
+      }
     }
   };
 
-  const startChatWithUser = (user: User) => {
-    // Check if conversation already exists
-    let existing = conversations.find(c => !c.isGroup && c.participants.some(p => p.id === user.id));
-    if (existing) {
-      setActiveConversation(existing);
-      setActiveTab('messages');
-      return;
+  const deleteMessage = async (convId: string, msgId: string) => {
+    const res = await apiFetch(`/api/messages/${convId}/${msgId}`, {
+      method: 'DELETE',
+    });
+    const data = await res.json();
+    if (data.success && data.message) {
+      setActiveConversationMessages(prev =>
+        prev.map(m => (m.id === msgId ? data.message : m))
+      );
+      setConversations(prev =>
+        prev.map(c =>
+          c.id === convId && c.lastMessage?.id === msgId
+            ? { ...c, lastMessage: data.message }
+            : c
+        )
+      );
+      if (auth.currentUser) {
+        setDoc(doc(db, 'conversations', convId, 'messages', msgId), data.message, { merge: true }).catch(() => {});
+      }
     }
-
-    // create new client-side conversation
-    const newConv: Conversation = {
-      id: `conv_${Date.now()}`,
-      isGroup: false,
-      participants: [currentUser!, user],
-      unreadCount: 0,
-      updatedAt: new Date().toISOString()
-    };
-    setConversations(prev => [newConv, ...prev]);
-    setActiveConversation(newConv);
-    setActiveTab('messages');
   };
 
-  // Calls
-  const startCall = (user: User, type: 'video' | 'audio') => {
+  const reactToMessage = async (convId: string, msgId: string, emoji: string) => {
+    const res = await apiFetch(`/api/messages/${convId}/${msgId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reactionEmoji: emoji }),
+    });
+    const data = await res.json();
+    if (data.success && data.message) {
+      setActiveConversationMessages(prev =>
+        prev.map(m => (m.id === msgId ? data.message : m))
+      );
+      if (auth.currentUser) {
+        setDoc(doc(db, 'conversations', convId, 'messages', msgId), data.message, { merge: true }).catch(() => {});
+      }
+    }
+  };
+
+  const setTypingStatus = async (convId: string, isTyping: boolean) => {
+    apiFetch(`/api/messages/conversations/${convId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isTyping }),
+    }).catch(() => {});
+  };
+
+  const togglePinConversation = async (convId: string) => {
+    const res = await apiFetch(`/api/messages/conversations/${convId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pin' }),
+    });
+    const data = await res.json();
+    if (data.success && data.conversation) {
+      setConversations(prev =>
+        prev
+          .map(c => (c.id === convId ? data.conversation : c))
+          .sort((a, b) => {
+            if (a.isPinned && !b.isPinned) return -1;
+            if (!a.isPinned && b.isPinned) return 1;
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+          })
+      );
+      if (activeConversation?.id === convId) {
+        setActiveConversation(data.conversation);
+      }
+    }
+  };
+
+  const toggleMuteConversation = async (convId: string) => {
+    const res = await apiFetch(`/api/messages/conversations/${convId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'mute' }),
+    });
+    const data = await res.json();
+    if (data.success && data.conversation) {
+      setConversations(prev => prev.map(c => (c.id === convId ? data.conversation : c)));
+      if (activeConversation?.id === convId) {
+        setActiveConversation(data.conversation);
+      }
+    }
+  };
+
+  const toggleArchiveConversation = async (convId: string) => {
+    const res = await apiFetch(`/api/messages/conversations/${convId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'archive' }),
+    });
+    const data = await res.json();
+    if (data.success && data.conversation) {
+      setConversations(prev => prev.map(c => (c.id === convId ? data.conversation : c)));
+      if (activeConversation?.id === convId) {
+        setActiveConversation(data.conversation);
+      }
+    }
+  };
+
+  const deleteConversation = async (convId: string) => {
+    const res = await apiFetch(`/api/messages/conversations/${convId}`, {
+      method: 'DELETE',
+    });
+    if (res.ok) {
+      setConversations(prev => prev.filter(c => c.id !== convId));
+      if (activeConversation?.id === convId) {
+        setActiveConversation(null);
+        setActiveConversationMessages([]);
+      }
+    }
+  };
+
+  const startChatWithUser = async (user: User): Promise<Conversation | null> => {
+    try {
+      const res = await apiFetch('/api/messages/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ participantId: user.id, participant: user }),
+      });
+      const data = await res.json();
+      if (data.success && data.conversation) {
+        const conv: Conversation = data.conversation;
+        setConversations(prev => {
+          const exists = prev.some(c => c.id === conv.id);
+          return exists ? prev.map(c => (c.id === conv.id ? conv : c)) : [conv, ...prev];
+        });
+        setActiveConversation(conv);
+        if (Array.isArray(data.messages)) {
+          setActiveConversationMessages(data.messages);
+        }
+        setActiveTab('messages');
+        return conv;
+      }
+    } catch (e) {
+      console.error('Failed to start conversation:', e);
+    }
+    return null;
+  };
+
+  // -------------------------------------------------------------
+  // Real-Time WebRTC Voice & Video Calls
+  // -------------------------------------------------------------
+  const startCall = async (user: User, type: 'video' | 'audio', conversationId?: string) => {
+    try {
+      const res = await apiFetch('/api/calls/initiate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          calleeId: user.id,
+          callee: user,
+          type,
+          conversationId: conversationId || activeConversation?.id
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.call) {
+        setActiveCall({
+          user,
+          type,
+          isIncoming: false,
+          callSession: data.call
+        });
+        setCallHistory(prev => [data.call, ...prev]);
+        if (auth.currentUser) {
+          setDoc(doc(db, 'calls', data.call.id), data.call, { merge: true }).catch(() => {});
+        }
+        return;
+      }
+    } catch (e) {
+      console.error('Call initiation error:', e);
+    }
     setActiveCall({ user, type, isIncoming: false });
   };
 
-  const endCall = () => {
+  const acceptCall = async () => {
+    if (!activeCall?.callSession) return;
+    try {
+      const res = await apiFetch(`/api/calls/${activeCall.callSession.id}/signal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'connected' }),
+      });
+      const data = await res.json();
+      if (data.success && data.call) {
+        setActiveCall(prev => (prev ? { ...prev, isIncoming: false, callSession: data.call } : null));
+        setCallHistory(prev => prev.map(c => (c.id === data.call.id ? data.call : c)));
+      }
+    } catch (e) {
+      console.error('Error accepting call:', e);
+    }
+  };
+
+  const rejectCall = async () => {
+    if (activeCall?.callSession) {
+      try {
+        const res = await apiFetch(`/api/calls/${activeCall.callSession.id}/signal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'rejected' }),
+        });
+        const data = await res.json();
+        if (data.success && data.call) {
+          setCallHistory(prev => prev.map(c => (c.id === data.call.id ? data.call : c)));
+        }
+      } catch (_) {}
+    }
+    setActiveCall(null);
+  };
+
+  const endCall = async () => {
+    if (activeCall?.callSession) {
+      try {
+        const res = await apiFetch(`/api/calls/${activeCall.callSession.id}/signal`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'ended' }),
+        });
+        const data = await res.json();
+        if (data.success && data.call) {
+          setCallHistory(prev => prev.map(c => (c.id === data.call.id ? data.call : c)));
+        }
+      } catch (_) {}
+    }
     setActiveCall(null);
   };
 
@@ -594,7 +1349,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         membersCount: g.membersCount + (nextMember ? 1 : -1)
       };
     }));
-    fetch(`/api/groups/${groupId}/join`, { method: 'POST' }).catch(console.error);
+    apiFetch(`/api/groups/${groupId}/join`, { method: 'POST' }).catch(console.error);
   };
 
   const rsvpEvent = async (eventId: string, status: 'going' | 'interested' | 'not_going') => {
@@ -607,7 +1362,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (prevGoing && !nowGoing) count = Math.max(0, count - 1);
       return { ...e, rsvpStatus: status, attendeesCount: count };
     }));
-    fetch(`/api/events/${eventId}/rsvp`, {
+    apiFetch(`/api/events/${eventId}/rsvp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
@@ -619,13 +1374,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const markAllNotificationsRead = async () => {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    fetch('/api/notifications/mark-read', { method: 'POST' }).catch(console.error);
+    apiFetch('/api/notifications/mark-read', { method: 'POST' }).catch(console.error);
   };
 
   // Live
   const sendLiveChatMessage = async (text: string) => {
     if (!currentUser) return;
-    const res = await fetch('/api/live/chat', {
+    const res = await apiFetch('/api/live/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
@@ -642,7 +1397,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Admin Reports
   const handleReportAction = async (reportId: string, action: 'resolve' | 'dismiss' | 'ban') => {
-    const res = await fetch(`/api/admin/reports/${reportId}/action`, {
+    const res = await apiFetch(`/api/admin/reports/${reportId}/action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action }),
@@ -664,11 +1419,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return p;
     }));
-    fetch(`/api/users/${userId}/follow`, { method: 'POST' }).catch(console.error);
+    setAllUsers(prev => prev.map(u => {
+      if (u.id === userId) {
+        const next = !u.isFollowing;
+        return { ...u, isFollowing: next, followersCount: Math.max(0, u.followersCount + (next ? 1 : -1)) };
+      }
+      return u;
+    }));
+    apiFetch(`/api/users/${userId}/follow`, { method: 'POST' }).catch(console.error);
   };
 
   const toggleFriendRequest = async (userId: string) => {
-    fetch(`/api/users/${userId}/friend`, { method: 'POST' }).catch(console.error);
+    apiFetch(`/api/users/${userId}/friend`, { method: 'POST' }).catch(console.error);
   };
 
   return (
@@ -683,8 +1445,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setActiveTab,
         viewingProfileUsername,
         setViewingProfileUsername,
+        activeSettingsSection,
+        setActiveSettingsSection,
         currentUser,
+        allUsers,
         updateCurrentUserProfile,
+        switchUserAccount,
+        registerUserAccount,
+        blockedUserIds,
+        toggleBlockUser,
         posts,
         feedType,
         setFeedType,
@@ -697,6 +1466,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getCommentsForPost,
         stories,
         createStory,
+        deleteStory,
         activeStoryIndex,
         setActiveStoryIndex,
         markStorySeen,
@@ -711,10 +1481,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         activeConversation,
         setActiveConversation,
         activeConversationMessages,
+        totalUnreadMessagesCount,
         sendMessage,
+        editMessage,
+        deleteMessage,
+        reactToMessage,
+        setTypingStatus,
+        togglePinConversation,
+        toggleMuteConversation,
+        toggleArchiveConversation,
+        deleteConversation,
         startChatWithUser,
         activeCall,
+        callHistory,
         startCall,
+        acceptCall,
+        rejectCall,
         endCall,
         groups,
         toggleJoinGroup,

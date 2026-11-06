@@ -20,7 +20,8 @@ import type {
   LiveStream,
   CreatorAnalytics,
   ContentReport,
-  ReactionType
+  ReactionType,
+  CallSession
 } from './src/types/index.ts';
 
 dotenv.config();
@@ -48,17 +49,39 @@ const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
+const COVERS_UPLOAD_DIR = path.join(DATA_DIR, 'uploads', 'covers');
+if (!fs.existsSync(COVERS_UPLOAD_DIR)) {
+  fs.mkdirSync(COVERS_UPLOAD_DIR, { recursive: true });
+}
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+
+function persistBase64CoverToDisk(userId: string, rawInput: string): string {
+  if (!rawInput || !rawInput.startsWith('data:image/') || rawInput.startsWith('data:image/svg+xml')) {
+    return rawInput;
+  }
+  const match = rawInput.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+  if (!match) return rawInput;
+  const mime = match[1];
+  const base64Data = match[2];
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+  const safeUser = String(userId || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `cover_${safeUser}_${Date.now()}.${ext}`;
+  const filePath = path.join(COVERS_UPLOAD_DIR, fileName);
+  fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+  return `/api/media/covers/${fileName}`;
+}
 
 // Default initial owner profile for Mohammad Siraj
 const DEFAULT_OWNER_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="%230f172a"/><circle cx="100" cy="100" r="76" fill="%231e293b" stroke="%23f43f5e" stroke-width="4"/><text x="100" y="118" font-family="system-ui,sans-serif" font-size="64" font-weight="bold" fill="%23ffffff" text-anchor="middle">MS</text></svg>';
+
+const DEFAULT_OWNER_COVER = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400"><defs><linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23020617"/><stop offset="45%" stop-color="%230f172a"/><stop offset="80%" stop-color="%234c1d95"/><stop offset="100%" stop-color="%23e11d48"/></linearGradient></defs><rect width="1200" height="400" fill="url(%23bg)"/><circle cx="950" cy="120" r="240" fill="%23f43f5e" fill-opacity="0.16"/><circle cx="240" cy="320" r="280" fill="%236366f1" fill-opacity="0.18"/></svg>';
 
 let currentUser: User = {
   id: 'u_owner_mohammad_siraj',
   username: 'mohammadsiraj',
   displayName: 'Mohammad Siraj',
   avatar: DEFAULT_OWNER_AVATAR,
-  coverPhoto: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1200&auto=format&fit=crop&q=80',
+  coverPhoto: DEFAULT_OWNER_COVER,
   bio: 'Founder & Creator of YourBby 🌐 YOUR WORLD. YOUR PEOPLE.',
   location: 'India',
   website: 'https://yourbby.social/@mohammadsiraj',
@@ -124,6 +147,8 @@ let notesList: Note[] = [];
 let conversationsList: Conversation[] = [];
 let messagesMap: Record<string, Message[]> = {};
 let notificationsList: NotificationItem[] = [];
+let callsList: CallSession[] = [];
+let userPresenceMap: Record<string, number> = {}; // userId -> last heartbeat timestamp ms
 
 let groupsList: Group[] = [
   {
@@ -222,6 +247,7 @@ function loadDb() {
       if (Array.isArray(data.conversationsList)) conversationsList = data.conversationsList;
       if (data.messagesMap) messagesMap = data.messagesMap;
       if (Array.isArray(data.notificationsList)) notificationsList = data.notificationsList;
+      if (Array.isArray(data.callsList)) callsList = data.callsList;
       if (data.creatorAnalytics) creatorAnalytics = data.creatorAnalytics;
       if (Array.isArray(data.contentReports)) contentReports = data.contentReports;
       console.log('Successfully loaded persisted database from', DB_FILE);
@@ -245,6 +271,7 @@ function saveDb() {
       conversationsList,
       messagesMap,
       notificationsList,
+      callsList,
       creatorAnalytics,
       contentReports,
       updatedAt: new Date().toISOString()
@@ -258,13 +285,132 @@ function saveDb() {
 // Initial DB load on boot
 loadDb();
 
+// Helper to resolve active user from x-user-id header (enables multi-tab / 2-account testing)
+function resolveUser(req: express.Request): User {
+  const headerUserId = req.headers['x-user-id'] as string | undefined;
+  if (headerUserId) {
+    const found = usersList.find(u => u.id === headerUserId || u.username.toLowerCase() === headerUserId.toLowerCase());
+    if (found) {
+      userPresenceMap[found.id] = Date.now();
+      found.isOnline = true;
+      found.lastSeen = new Date().toISOString();
+      return found;
+    }
+  }
+  userPresenceMap[currentUser.id] = Date.now();
+  currentUser.isOnline = true;
+  currentUser.lastSeen = new Date().toISOString();
+  return currentUser;
+}
+
+function getEnrichedUser(u: User): User {
+  const lastBeat = userPresenceMap[u.id];
+  // Consider user genuinely online if they had activity within the last 45 seconds or are currentUser
+  const isRecentlyActive = lastBeat ? (Date.now() - lastBeat < 45000) : Boolean(u.isOnline);
+  return {
+    ...u,
+    isOnline: isRecentlyActive,
+    lastSeen: u.lastSeen || new Date().toISOString()
+  };
+}
+
 // -------------------------------------------------------------
 // REST API Routes
 // -------------------------------------------------------------
 
 // 1. Current User & Profiles
 app.get('/api/me', (req, res) => {
-  res.json({ success: true, user: currentUser });
+  const activeUser = resolveUser(req);
+  res.json({ success: true, user: getEnrichedUser(activeUser) });
+});
+
+// Switch active account or register a new real user account
+app.post('/api/auth/switch', (req, res) => {
+  const { userId, username } = req.body;
+  const target = usersList.find(
+    u => (userId && u.id === userId) || (username && u.username.toLowerCase() === String(username).toLowerCase().replace(/^@/, ''))
+  );
+  if (!target) {
+    return res.status(404).json({ error: 'Account not found' });
+  }
+  userPresenceMap[target.id] = Date.now();
+  target.isOnline = true;
+  target.lastSeen = new Date().toISOString();
+  currentUser = target;
+  saveDb();
+  res.json({ success: true, user: getEnrichedUser(target) });
+});
+
+app.post('/api/users/register', (req, res) => {
+  const { id, displayName, username, bio, location, website, avatar, coverPhoto, privacy } = req.body;
+  const cleanUsername = String(username || '').trim().toLowerCase().replace(/^@/, '');
+  if (!cleanUsername || !/^[a-zA-Z0-9_]{3,30}$/.test(cleanUsername)) {
+    return res.status(400).json({ error: 'Valid username (3-30 characters) is required' });
+  }
+  if (!displayName || !String(displayName).trim()) {
+    return res.status(400).json({ error: 'Display name is required' });
+  }
+  const existing = usersList.find(u => u.username.toLowerCase() === cleanUsername && u.id !== id);
+  if (existing) {
+    return res.status(409).json({ error: 'Username is already taken' });
+  }
+
+  const initials = String(displayName).trim().split(/\s+/).map((w: string) => w[0]?.toUpperCase() || '').join('').slice(0, 2) || 'U';
+  const defaultSvgAvatar = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="%230f172a"/><circle cx="100" cy="100" r="76" fill="%231e293b" stroke="%236366f1" stroke-width="4"/><text x="100" y="118" font-family="system-ui,sans-serif" font-size="64" font-weight="bold" fill="%23ffffff" text-anchor="middle">${initials}</text></svg>`;
+
+  let userRecord = usersList.find(u => (id && u.id === id) || u.username.toLowerCase() === cleanUsername);
+  if (userRecord) {
+    userRecord.displayName = String(displayName).trim();
+    userRecord.username = cleanUsername;
+    if (bio !== undefined) userRecord.bio = bio;
+    if (location !== undefined) userRecord.location = location;
+    if (website !== undefined) userRecord.website = website;
+    if (avatar) userRecord.avatar = avatar;
+    if (coverPhoto) userRecord.coverPhoto = coverPhoto;
+    if (privacy) userRecord.privacy = privacy;
+    userRecord.isOnline = true;
+    userRecord.lastSeen = new Date().toISOString();
+  } else {
+    userRecord = {
+      id: id || `u_${Date.now()}`,
+      username: cleanUsername,
+      displayName: String(displayName).trim(),
+      avatar: avatar || defaultSvgAvatar,
+      coverPhoto: coverPhoto || '',
+      bio: bio || '',
+      location: location || '',
+      website: website || '',
+      verified: false,
+      role: 'user',
+      followersCount: 0,
+      followingCount: 0,
+      friendsCount: 0,
+      isOnline: true,
+      lastSeen: new Date().toISOString(),
+      privacy: privacy || 'public'
+    };
+    usersList.push(userRecord);
+  }
+
+  userPresenceMap[userRecord.id] = Date.now();
+  currentUser = userRecord;
+  saveDb();
+  res.status(201).json({ success: true, user: getEnrichedUser(userRecord), users: usersList.map(getEnrichedUser) });
+});
+
+app.post('/api/users/presence', (req, res) => {
+  const activeUser = resolveUser(req);
+  const { isOnline } = req.body;
+  if (isOnline === false) {
+    delete userPresenceMap[activeUser.id];
+    activeUser.isOnline = false;
+  } else {
+    userPresenceMap[activeUser.id] = Date.now();
+    activeUser.isOnline = true;
+  }
+  activeUser.lastSeen = new Date().toISOString();
+  saveDb();
+  res.json({ success: true, user: getEnrichedUser(activeUser) });
 });
 
 // Check username availability
@@ -290,85 +436,187 @@ app.get('/api/users/check-username', (req, res) => {
   });
 });
 
+// Dedicated Binary Cover Photo Upload & Serving Endpoints
+app.post(
+  '/api/media/cover',
+  express.raw({ type: ['image/jpeg', 'image/png', 'image/webp', 'application/octet-stream'], limit: '20mb' }),
+  (req, res) => {
+    try {
+      const activeUser = resolveUser(req);
+      const safeUser = String(activeUser.id || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+        const contentType = String(req.headers['content-type'] || 'image/jpeg');
+        const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+        const fileName = `cover_${safeUser}_${Date.now()}.${ext}`;
+        const filePath = path.join(COVERS_UPLOAD_DIR, fileName);
+        fs.writeFileSync(filePath, req.body);
+        const downloadURL = `/api/media/covers/${fileName}`;
+        return res.status(201).json({ success: true, downloadURL, sizeBytes: req.body.length });
+      }
+
+      if (req.body && typeof req.body === 'object' && req.body.dataUrl) {
+        const downloadURL = persistBase64CoverToDisk(activeUser.id, String(req.body.dataUrl));
+        return res.status(201).json({ success: true, downloadURL });
+      }
+
+      return res.status(400).json({ success: false, error: 'No binary image payload received' });
+    } catch (err: any) {
+      console.error('Cover binary upload error:', err);
+      return res.status(500).json({ success: false, error: err?.message || 'Cover upload failed' });
+    }
+  }
+);
+
+app.get('/api/media/covers/:filename', (req, res) => {
+  const safeName = path.basename(req.params.filename);
+  const filePath = path.join(COVERS_UPLOAD_DIR, safeName);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('Cover image not found');
+  }
+  const ext = path.extname(safeName).toLowerCase();
+  const mime =
+    ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  return res.sendFile(filePath);
+});
+
 // Update Profile with full fields, validation, and disk persistence
 app.put('/api/me', (req, res) => {
-  const { displayName, username, bio, location, website, avatar, coverPhoto, privacy } = req.body;
+  const activeUser = resolveUser(req);
+  const { displayName, username, bio, location, website, avatar, coverPhoto, coverPhotoURL, privacy } = req.body;
 
   if (displayName && typeof displayName === 'string') {
-    currentUser.displayName = displayName.trim();
+    activeUser.displayName = displayName.trim();
   }
 
   if (username && typeof username === 'string') {
     const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
-    if (cleanUsername !== currentUser.username.toLowerCase()) {
+    if (cleanUsername !== activeUser.username.toLowerCase()) {
       if (!/^[a-zA-Z0-9_]{3,30}$/.test(cleanUsername)) {
         return res.status(400).json({ error: 'Username must be 3-30 alphanumeric characters' });
       }
       const isTaken = usersList.some(
-        u => u.username.toLowerCase() === cleanUsername && u.id !== currentUser.id
+        u => u.username.toLowerCase() === cleanUsername && u.id !== activeUser.id
       );
       if (isTaken) {
         return res.status(409).json({ error: 'Username is already in use by another account' });
       }
-      currentUser.username = cleanUsername;
+      activeUser.username = cleanUsername;
     }
   }
 
-  if (bio !== undefined) currentUser.bio = bio;
-  if (location !== undefined) currentUser.location = location;
-  if (website !== undefined) currentUser.website = website;
-  if (avatar) currentUser.avatar = avatar;
-  if (coverPhoto) currentUser.coverPhoto = coverPhoto;
-  if (privacy) currentUser.privacy = privacy;
+  if (bio !== undefined) activeUser.bio = bio;
+  if (location !== undefined) activeUser.location = location;
+  if (website !== undefined) activeUser.website = website;
+  if (avatar !== undefined && avatar !== null && avatar !== '') {
+    activeUser.avatar = avatar;
+  }
+  if (coverPhotoURL !== undefined || coverPhoto !== undefined) {
+    const rawCover = coverPhotoURL !== undefined ? coverPhotoURL : coverPhoto;
+    const resolvedCover = rawCover ? persistBase64CoverToDisk(activeUser.id, String(rawCover)) : '';
+    activeUser.coverPhotoURL = resolvedCover;
+    activeUser.coverPhoto = resolvedCover;
+  }
+  if (privacy) activeUser.privacy = privacy;
 
-  const idx = usersList.findIndex(u => u.id === currentUser.id);
+  if (currentUser.id === activeUser.id) {
+    currentUser = activeUser;
+  }
+
+  const idx = usersList.findIndex(u => u.id === activeUser.id);
   if (idx !== -1) {
-    usersList[idx] = { ...currentUser };
+    usersList[idx] = { ...activeUser };
   } else {
-    usersList.push({ ...currentUser });
+    usersList.push({ ...activeUser });
   }
 
-  // Update author references in posts
+  // Update author references in posts, stories, reels, and conversations (One User — One Profile)
   postsList.forEach(p => {
-    if (p.authorId === currentUser.id) {
-      p.author = { ...currentUser };
+    if (p.authorId === activeUser.id || p.author.id === activeUser.id) {
+      p.author = { ...activeUser };
     }
+  });
+  storiesList.forEach(s => {
+    if (s.author.id === activeUser.id) {
+      s.author = { ...activeUser };
+    }
+  });
+  reelsList.forEach(r => {
+    if (r.author.id === activeUser.id) {
+      r.author = { ...activeUser };
+    }
+  });
+  conversationsList.forEach(c => {
+    c.participants = c.participants.map(p => (p.id === activeUser.id ? { ...activeUser } : p));
   });
 
   saveDb();
-  res.json({ success: true, user: currentUser });
+  res.json({ success: true, user: getEnrichedUser(activeUser) });
 });
 
 // Dedicated POST /api/profile/update endpoint
 app.post('/api/profile/update', (req, res) => {
-  const { displayName, username, bio, location, website, avatar, coverPhoto, privacy, userId } = req.body;
+  const activeUser = resolveUser(req);
+  const { displayName, username, bio, location, website, avatar, coverPhoto, coverPhotoURL, privacy, userId } = req.body;
 
   // Protect against non-owner editing other users' content
-  if (userId && userId !== currentUser.id) {
+  if (userId && userId !== activeUser.id) {
     return res.status(403).json({ error: 'Permission denied: Cannot edit another user profile' });
   }
 
-  if (displayName) currentUser.displayName = displayName.trim();
+  if (displayName) activeUser.displayName = displayName.trim();
   if (username) {
     const clean = username.trim().toLowerCase().replace(/^@/, '');
-    if (clean !== currentUser.username.toLowerCase()) {
-      const isTaken = usersList.some(u => u.username.toLowerCase() === clean && u.id !== currentUser.id);
+    if (clean !== activeUser.username.toLowerCase()) {
+      const isTaken = usersList.some(u => u.username.toLowerCase() === clean && u.id !== activeUser.id);
       if (isTaken) return res.status(409).json({ error: 'Username is already taken' });
-      currentUser.username = clean;
+      activeUser.username = clean;
     }
   }
-  if (bio !== undefined) currentUser.bio = bio;
-  if (location !== undefined) currentUser.location = location;
-  if (website !== undefined) currentUser.website = website;
-  if (avatar) currentUser.avatar = avatar;
-  if (coverPhoto) currentUser.coverPhoto = coverPhoto;
-  if (privacy) currentUser.privacy = privacy;
+  if (bio !== undefined) activeUser.bio = bio;
+  if (location !== undefined) activeUser.location = location;
+  if (website !== undefined) activeUser.website = website;
+  if (avatar !== undefined && avatar !== null && avatar !== '') {
+    activeUser.avatar = avatar;
+  }
+  if (coverPhotoURL !== undefined || coverPhoto !== undefined) {
+    const rawCover = coverPhotoURL !== undefined ? coverPhotoURL : coverPhoto;
+    const resolvedCover = rawCover ? persistBase64CoverToDisk(activeUser.id, String(rawCover)) : '';
+    activeUser.coverPhotoURL = resolvedCover;
+    activeUser.coverPhoto = resolvedCover;
+  }
+  if (privacy) activeUser.privacy = privacy;
 
-  const idx = usersList.findIndex(u => u.id === currentUser.id);
-  if (idx !== -1) usersList[idx] = { ...currentUser };
+  if (currentUser.id === activeUser.id) {
+    currentUser = activeUser;
+  }
+
+  const idx = usersList.findIndex(u => u.id === activeUser.id);
+  if (idx !== -1) usersList[idx] = { ...activeUser };
+
+  postsList.forEach(p => {
+    if (p.authorId === activeUser.id || p.author.id === activeUser.id) {
+      p.author = { ...activeUser };
+    }
+  });
+  storiesList.forEach(s => {
+    if (s.author.id === activeUser.id) {
+      s.author = { ...activeUser };
+    }
+  });
+  reelsList.forEach(r => {
+    if (r.author.id === activeUser.id) {
+      r.author = { ...activeUser };
+    }
+  });
+  conversationsList.forEach(c => {
+    c.participants = c.participants.map(p => (p.id === activeUser.id ? { ...activeUser } : p));
+  });
 
   saveDb();
-  res.json({ success: true, user: currentUser });
+  res.json({ success: true, user: getEnrichedUser(activeUser) });
 });
 
 app.get('/api/users/:username', (req, res) => {
@@ -379,11 +627,12 @@ app.get('/api/users/:username', (req, res) => {
   }
   const userPosts = postsList.filter(p => p.authorId === user.id || p.author.username === user.username);
   const userReels = reelsList.filter(r => r.author.username === user.username);
-  res.json({ success: true, user, posts: userPosts, reels: userReels });
+  res.json({ success: true, user: getEnrichedUser(user), posts: userPosts, reels: userReels });
 });
 
 app.get('/api/users', (req, res) => {
-  res.json({ success: true, users: usersList });
+  resolveUser(req);
+  res.json({ success: true, users: usersList.map(getEnrichedUser) });
 });
 
 app.post('/api/users/:id/follow', (req, res) => {
@@ -575,22 +824,35 @@ app.post('/api/posts/:id/comments', (req, res) => {
 
 // 4. Stories & Notes
 app.get('/api/stories', (req, res) => {
-  res.json({ success: true, stories: storiesList });
+  const nowMs = Date.now();
+  const activeStories = storiesList.filter(s => {
+    const exp = new Date(s.expiresAt).getTime();
+    return Number.isNaN(exp) || exp > nowMs;
+  });
+  if (activeStories.length !== storiesList.length) {
+    storiesList = activeStories;
+    saveDb();
+  }
+  res.json({ success: true, stories: activeStories });
 });
 
 app.post('/api/stories', (req, res) => {
-  const { mediaUrl, mediaType, textOverlay, backgroundGradient, stickers } = req.body;
+  const activeUser = resolveUser(req);
+  const { mediaUrl, mediaType, textOverlay, backgroundGradient, stickers, privacy } = req.body;
   const newStory: Story = {
     id: `s_${Date.now()}`,
-    author: currentUser,
+    author: getEnrichedUser(activeUser),
     mediaUrl,
-    mediaType: mediaType || 'image',
+    mediaType: mediaType || (mediaUrl ? 'image' : 'text'),
     textOverlay,
     backgroundGradient,
+    privacy: privacy || 'public',
     createdAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
     seen: false,
     viewsCount: 0,
+    viewerIds: [],
+    viewers: [],
     stickers: stickers || []
   };
   storiesList.unshift(newStory);
@@ -599,12 +861,42 @@ app.post('/api/stories', (req, res) => {
 });
 
 app.post('/api/stories/:id/view', (req, res) => {
+  const activeUser = resolveUser(req);
   const story = storiesList.find(s => s.id === req.params.id);
   if (story) {
     story.seen = true;
-    story.viewsCount++;
+    if (!story.viewerIds) story.viewerIds = [];
+    if (!story.viewers) story.viewers = [];
+    if (!story.viewerIds.includes(activeUser.id)) {
+      story.viewerIds.push(activeUser.id);
+      story.viewers.unshift({
+        id: activeUser.id,
+        displayName: activeUser.displayName,
+        username: activeUser.username,
+        avatar: activeUser.avatar,
+        viewedAt: new Date().toISOString()
+      });
+      story.viewsCount = Math.max(story.viewsCount + 1, story.viewerIds.length);
+    }
     saveDb();
   }
+  res.json({ success: true, story });
+});
+
+app.delete('/api/stories/:id', (req, res) => {
+  const activeUser = resolveUser(req);
+  const idx = storiesList.findIndex(s => s.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Story not found' });
+  const target = storiesList[idx];
+  if (
+    target.author.id !== activeUser.id &&
+    target.author.username !== activeUser.username &&
+    activeUser.role !== 'admin'
+  ) {
+    return res.status(403).json({ error: 'Only the story author can delete this story' });
+  }
+  storiesList.splice(idx, 1);
+  saveDb();
   res.json({ success: true });
 });
 
@@ -674,45 +966,531 @@ app.post('/api/reels/:id/like', (req, res) => {
   res.json({ success: true, hasLiked: reel.hasLiked, likesCount: reel.likesCount });
 });
 
-// 6. Direct Messenger
+// 6. Direct Messenger & Real-Time WebRTC Calling
+function isConvParticipant(conv: Conversation, userId: string): boolean {
+  if (conv.participantIds && conv.participantIds.includes(userId)) return true;
+  return conv.participants.some(p => p.id === userId);
+}
+
+function formatConversationForUser(conv: Conversation, userId: string): Conversation {
+  const enrichedParticipants = conv.participants.map(p => {
+    const latestUser = usersList.find(u => u.id === p.id) || p;
+    return getEnrichedUser(latestUser);
+  });
+  const unreadForUser = conv.unreadCounts?.[userId] ?? (conv.lastMessage && conv.lastMessage.senderId !== userId && !conv.lastMessage.read ? conv.unreadCount : 0);
+  const isPinned = conv.pinnedBy ? conv.pinnedBy.includes(userId) : Boolean(conv.isPinned);
+  const isMuted = conv.mutedBy ? conv.mutedBy.includes(userId) : Boolean(conv.isMuted);
+  const isArchived = conv.archivedBy ? conv.archivedBy.includes(userId) : Boolean(conv.isArchived);
+
+  return {
+    ...conv,
+    participants: enrichedParticipants,
+    participantIds: enrichedParticipants.map(p => p.id),
+    unreadCount: unreadForUser,
+    isPinned,
+    isMuted,
+    isArchived,
+    typingUserIds: (conv.typingUserIds || []).filter(id => id !== userId)
+  };
+}
+
 app.get('/api/messages/conversations', (req, res) => {
-  res.json({ success: true, conversations: conversationsList });
+  const activeUser = resolveUser(req);
+  let dirty = false;
+
+  // Filter to only conversations where activeUser is a participant and has not deleted it
+  const userConvs = conversationsList.filter(c => {
+    if (!isConvParticipant(c, activeUser.id)) return false;
+    if (c.deletedBy && c.deletedBy.includes(activeUser.id)) return false;
+    return true;
+  });
+
+  // Mark any 'sent' messages from other participants as 'delivered' now that recipient's client received them
+  userConvs.forEach(c => {
+    const msgs = messagesMap[c.id] || [];
+    msgs.forEach(m => {
+      if (m.senderId !== activeUser.id && (!m.status || m.status === 'sent')) {
+        m.status = 'delivered';
+        m.deliveredAt = new Date().toISOString();
+        dirty = true;
+      }
+    });
+    if (msgs.length > 0) {
+      c.lastMessage = msgs[msgs.length - 1];
+    }
+  });
+
+  if (dirty) saveDb();
+
+  const formatted = userConvs
+    .map(c => formatConversationForUser(c, activeUser.id))
+    .sort((a, b) => {
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+    });
+
+  res.json({ success: true, conversations: formatted });
+});
+
+// Create or get 1-to-1 conversation
+app.post('/api/messages/conversations', (req, res) => {
+  const activeUser = resolveUser(req);
+  const { participantId, participant } = req.body;
+  const targetId = participantId || participant?.id;
+  if (!targetId) {
+    return res.status(400).json({ error: 'Target participantId is required' });
+  }
+
+  let targetUser = usersList.find(u => u.id === targetId || u.username === participant?.username);
+  if (!targetUser && participant) {
+    targetUser = {
+      id: targetId,
+      username: participant.username || `user_${Date.now()}`,
+      displayName: participant.displayName || 'YourBby User',
+      avatar: participant.avatar || DEFAULT_OWNER_AVATAR,
+      verified: Boolean(participant.verified),
+      role: participant.role || 'user',
+      followersCount: 0,
+      followingCount: 0,
+      friendsCount: 0,
+      isOnline: Boolean(participant.isOnline)
+    };
+    usersList.push(targetUser);
+  }
+  if (!targetUser) {
+    return res.status(404).json({ error: 'Target user not found' });
+  }
+
+  // Check if 1-to-1 conversation already exists between activeUser and targetUser
+  let conv = conversationsList.find(c =>
+    !c.isGroup &&
+    isConvParticipant(c, activeUser.id) &&
+    isConvParticipant(c, targetUser!.id) &&
+    (activeUser.id === targetUser!.id ? c.participants.every(p => p.id === activeUser.id) : true)
+  );
+
+  if (conv) {
+    // Restore if previously deleted by activeUser
+    if (conv.deletedBy) {
+      conv.deletedBy = conv.deletedBy.filter(id => id !== activeUser.id);
+    }
+    saveDb();
+    return res.json({
+      success: true,
+      conversation: formatConversationForUser(conv, activeUser.id),
+      messages: messagesMap[conv.id] || []
+    });
+  }
+
+  const participants = activeUser.id === targetUser.id ? [activeUser] : [activeUser, targetUser];
+  conv = {
+    id: `conv_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    isGroup: false,
+    participants,
+    participantIds: participants.map(p => p.id),
+    unreadCount: 0,
+    unreadCounts: { [activeUser.id]: 0, [targetUser.id]: 0 },
+    pinnedBy: [],
+    mutedBy: [],
+    archivedBy: [],
+    deletedBy: [],
+    typingUserIds: [],
+    updatedAt: new Date().toISOString()
+  };
+
+  conversationsList.unshift(conv);
+  if (!messagesMap[conv.id]) messagesMap[conv.id] = [];
+  saveDb();
+
+  res.status(201).json({
+    success: true,
+    conversation: formatConversationForUser(conv, activeUser.id),
+    messages: []
+  });
 });
 
 app.get('/api/messages/conversations/:id', (req, res) => {
+  const activeUser = resolveUser(req);
   const conv = conversationsList.find(c => c.id === req.params.id);
   if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+  if (!isConvParticipant(conv, activeUser.id)) {
+    return res.status(403).json({ error: 'Access denied: only conversation participants can read messages' });
+  }
+
   const messages = messagesMap[conv.id] || [];
-  conv.unreadCount = 0;
-  saveDb();
-  res.json({ success: true, conversation: conv, messages });
+  let updated = false;
+  const nowIso = new Date().toISOString();
+
+  messages.forEach(m => {
+    if (m.senderId !== activeUser.id && (!m.read || m.status !== 'read')) {
+      m.read = true;
+      m.status = 'read';
+      m.readAt = nowIso;
+      if (!m.deliveredAt) m.deliveredAt = nowIso;
+      updated = true;
+    }
+  });
+
+  if (!conv.unreadCounts) conv.unreadCounts = {};
+  if (conv.unreadCounts[activeUser.id] !== 0 || conv.unreadCount !== 0) {
+    conv.unreadCounts[activeUser.id] = 0;
+    conv.unreadCount = 0;
+    updated = true;
+  }
+
+  if (messages.length > 0) {
+    conv.lastMessage = messages[messages.length - 1];
+  }
+
+  if (updated) saveDb();
+
+  res.json({
+    success: true,
+    conversation: formatConversationForUser(conv, activeUser.id),
+    messages
+  });
 });
 
-app.post('/api/messages/conversations/:id/send', (req, res) => {
+// Update conversation settings: pin, mute, archive, typing, markRead
+app.patch('/api/messages/conversations/:id', (req, res) => {
+  const activeUser = resolveUser(req);
   const conv = conversationsList.find(c => c.id === req.params.id);
   if (!conv) return res.status(404).json({ error: 'Conversation not found' });
-  const { text, mediaUrl, mediaType, voiceDurationSeconds } = req.body;
+  if (!isConvParticipant(conv, activeUser.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const { action, isTyping } = req.body;
+  if (!conv.pinnedBy) conv.pinnedBy = conv.isPinned ? [activeUser.id] : [];
+  if (!conv.mutedBy) conv.mutedBy = conv.isMuted ? [activeUser.id] : [];
+  if (!conv.archivedBy) conv.archivedBy = conv.isArchived ? [activeUser.id] : [];
+  if (!conv.typingUserIds) conv.typingUserIds = [];
+
+  if (action === 'pin') {
+    if (conv.pinnedBy.includes(activeUser.id)) {
+      conv.pinnedBy = conv.pinnedBy.filter(id => id !== activeUser.id);
+    } else {
+      conv.pinnedBy.push(activeUser.id);
+    }
+  } else if (action === 'mute') {
+    if (conv.mutedBy.includes(activeUser.id)) {
+      conv.mutedBy = conv.mutedBy.filter(id => id !== activeUser.id);
+    } else {
+      conv.mutedBy.push(activeUser.id);
+    }
+  } else if (action === 'archive') {
+    if (conv.archivedBy.includes(activeUser.id)) {
+      conv.archivedBy = conv.archivedBy.filter(id => id !== activeUser.id);
+    } else {
+      conv.archivedBy.push(activeUser.id);
+    }
+  } else if (action === 'mark_read') {
+    if (!conv.unreadCounts) conv.unreadCounts = {};
+    conv.unreadCounts[activeUser.id] = 0;
+    const msgs = messagesMap[conv.id] || [];
+    const nowIso = new Date().toISOString();
+    msgs.forEach(m => {
+      if (m.senderId !== activeUser.id) {
+        m.read = true;
+        m.status = 'read';
+        m.readAt = nowIso;
+      }
+    });
+  }
+
+  if (typeof isTyping === 'boolean') {
+    if (isTyping) {
+      if (!conv.typingUserIds.includes(activeUser.id)) {
+        conv.typingUserIds.push(activeUser.id);
+      }
+    } else {
+      conv.typingUserIds = conv.typingUserIds.filter(id => id !== activeUser.id);
+    }
+  }
+
+  saveDb();
+  res.json({
+    success: true,
+    conversation: formatConversationForUser(conv, activeUser.id)
+  });
+});
+
+// Delete conversation for requesting participant
+app.delete('/api/messages/conversations/:id', (req, res) => {
+  const activeUser = resolveUser(req);
+  const conv = conversationsList.find(c => c.id === req.params.id);
+  if (!conv) return res.status(404).json({ error: 'Conversation not found' });
+  if (!isConvParticipant(conv, activeUser.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  if (!conv.deletedBy) conv.deletedBy = [];
+  if (!conv.deletedBy.includes(activeUser.id)) {
+    conv.deletedBy.push(activeUser.id);
+  }
+  saveDb();
+  res.json({ success: true });
+});
+
+// Send message in conversation
+app.post('/api/messages/conversations/:id/send', (req, res) => {
+  const activeUser = resolveUser(req);
+  let conv = conversationsList.find(c => c.id === req.params.id);
+  if (!conv) {
+    return res.status(404).json({ error: 'Conversation not found' });
+  }
+  if (!isConvParticipant(conv, activeUser.id)) {
+    return res.status(403).json({ error: 'Access denied: only participants can send messages' });
+  }
+
+  const {
+    text,
+    mediaUrl,
+    mediaUrls,
+    mediaType,
+    fileName,
+    fileSize,
+    voiceDurationSeconds,
+    voiceWaveform,
+    replyTo
+  } = req.body;
+
+  const otherParticipants = conv.participants.filter(p => p.id !== activeUser.id);
+  const anyRecipientOnline = otherParticipants.some(p => getEnrichedUser(p).isOnline);
+  const nowIso = new Date().toISOString();
 
   const newMsg: Message = {
-    id: `m_${Date.now()}`,
+    id: `m_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
     conversationId: conv.id,
-    senderId: currentUser.id,
-    sender: currentUser,
+    senderId: activeUser.id,
+    sender: getEnrichedUser(activeUser),
     text: text || '',
-    mediaUrl,
+    mediaUrl: mediaUrl || (Array.isArray(mediaUrls) && mediaUrls.length > 0 ? mediaUrls[0] : undefined),
+    mediaUrls: Array.isArray(mediaUrls) ? mediaUrls : (mediaUrl ? [mediaUrl] : undefined),
     mediaType,
+    fileName,
+    fileSize,
     voiceDurationSeconds,
-    createdAt: new Date().toISOString(),
-    read: true
+    voiceWaveform,
+    replyTo,
+    createdAt: nowIso,
+    deliveredAt: anyRecipientOnline ? nowIso : undefined,
+    status: anyRecipientOnline ? 'delivered' : 'sent',
+    read: false,
+    reactions: []
   };
 
   if (!messagesMap[conv.id]) messagesMap[conv.id] = [];
   messagesMap[conv.id].push(newMsg);
   conv.lastMessage = newMsg;
   conv.updatedAt = newMsg.createdAt;
-  saveDb();
+  conv.deletedBy = []; // Restore conversation for all participants on new message
+  conv.typingUserIds = (conv.typingUserIds || []).filter(id => id !== activeUser.id);
 
-  res.status(201).json({ success: true, message: newMsg });
+  if (!conv.unreadCounts) conv.unreadCounts = {};
+  otherParticipants.forEach(p => {
+    conv!.unreadCounts![p.id] = (conv!.unreadCounts![p.id] || 0) + 1;
+    const isMutedByRecipient = conv!.mutedBy?.includes(p.id);
+    if (!isMutedByRecipient) {
+      notificationsList.unshift({
+        id: `notif_msg_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+        type: 'message',
+        actor: getEnrichedUser(activeUser),
+        conversationId: conv!.id,
+        text: `sent you ${mediaType === 'voice' ? 'a voice message' : mediaType ? `a ${mediaType}` : `a message: "${(text || '').slice(0, 40)}"`}`,
+        createdAt: nowIso,
+        read: false
+      });
+    }
+  });
+
+  saveDb();
+  res.status(201).json({
+    success: true,
+    message: newMsg,
+    conversation: formatConversationForUser(conv, activeUser.id)
+  });
+});
+
+// Edit own message or toggle reaction on a message
+app.patch('/api/messages/:convId/:msgId', (req, res) => {
+  const activeUser = resolveUser(req);
+  const conv = conversationsList.find(c => c.id === req.params.convId);
+  if (!conv || !isConvParticipant(conv, activeUser.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const msgs = messagesMap[conv.id] || [];
+  const msg = msgs.find(m => m.id === req.params.msgId);
+  if (!msg) return res.status(404).json({ error: 'Message not found' });
+
+  const { text, reactionEmoji } = req.body;
+
+  // Editing message text (only sender can edit)
+  if (typeof text === 'string') {
+    if (msg.senderId !== activeUser.id) {
+      return res.status(403).json({ error: 'Only the sender can edit their message' });
+    }
+    if (msg.isDeleted) {
+      return res.status(400).json({ error: 'Cannot edit a deleted message' });
+    }
+    msg.text = text.trim();
+    msg.isEdited = true;
+    msg.editedAt = new Date().toISOString();
+  }
+
+  // Toggling emoji reaction
+  if (reactionEmoji) {
+    if (!msg.reactions) msg.reactions = [];
+    const existingIdx = msg.reactions.findIndex(
+      r => r.userId === activeUser.id && r.emoji === reactionEmoji
+    );
+    if (existingIdx !== -1) {
+      msg.reactions.splice(existingIdx, 1);
+    } else {
+      // Replace any previous reaction by same user or add new
+      msg.reactions = msg.reactions.filter(r => r.userId !== activeUser.id);
+      msg.reactions.push({
+        emoji: reactionEmoji,
+        userId: activeUser.id,
+        userName: activeUser.displayName
+      });
+    }
+  }
+
+  if (conv.lastMessage && conv.lastMessage.id === msg.id) {
+    conv.lastMessage = { ...msg };
+  }
+
+  saveDb();
+  res.json({ success: true, message: msg });
+});
+
+// Delete own message
+app.delete('/api/messages/:convId/:msgId', (req, res) => {
+  const activeUser = resolveUser(req);
+  const conv = conversationsList.find(c => c.id === req.params.convId);
+  if (!conv || !isConvParticipant(conv, activeUser.id)) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  const msgs = messagesMap[conv.id] || [];
+  const msg = msgs.find(m => m.id === req.params.msgId);
+  if (!msg) return res.status(404).json({ error: 'Message not found' });
+  if (msg.senderId !== activeUser.id) {
+    return res.status(403).json({ error: 'Only the sender can delete their own message' });
+  }
+
+  msg.isDeleted = true;
+  msg.text = 'This message was deleted';
+  msg.mediaUrl = undefined;
+  msg.mediaUrls = undefined;
+  msg.mediaType = undefined;
+  msg.fileName = undefined;
+  msg.fileSize = undefined;
+  msg.voiceDurationSeconds = undefined;
+
+  if (conv.lastMessage && conv.lastMessage.id === msg.id) {
+    conv.lastMessage = { ...msg };
+  }
+
+  saveDb();
+  res.json({ success: true, message: msg });
+});
+
+// WebRTC Voice & Video Calls Signaling & Call History
+app.get('/api/calls', (req, res) => {
+  const activeUser = resolveUser(req);
+  const userCalls = callsList
+    .filter(c => c.callerId === activeUser.id || c.calleeId === activeUser.id)
+    .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+
+  const incomingCall = userCalls.find(
+    c => c.calleeId === activeUser.id && c.status === 'ringing' &&
+    (Date.now() - new Date(c.startedAt).getTime() < 60000)
+  ) || null;
+
+  res.json({
+    success: true,
+    calls: userCalls.slice(0, 50),
+    incomingCall
+  });
+});
+
+app.post('/api/calls/initiate', (req, res) => {
+  const activeUser = resolveUser(req);
+  const { calleeId, callee, type, conversationId, offer } = req.body;
+  const targetUser = usersList.find(u => u.id === (calleeId || callee?.id)) || callee;
+  if (!targetUser) {
+    return res.status(404).json({ error: 'Recipient user not found' });
+  }
+
+  const newCall: CallSession = {
+    id: `call_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    conversationId,
+    callerId: activeUser.id,
+    caller: getEnrichedUser(activeUser),
+    calleeId: targetUser.id,
+    callee: getEnrichedUser(targetUser),
+    type: type === 'audio' ? 'audio' : 'video',
+    status: 'ringing',
+    startedAt: new Date().toISOString(),
+    offer: offer || null,
+    answer: null,
+    callerCandidates: [],
+    calleeCandidates: []
+  };
+
+  callsList.unshift(newCall);
+  saveDb();
+  res.status(201).json({ success: true, call: newCall });
+});
+
+app.get('/api/calls/:id', (req, res) => {
+  const call = callsList.find(c => c.id === req.params.id);
+  if (!call) return res.status(404).json({ error: 'Call session not found' });
+  res.json({ success: true, call });
+});
+
+app.post('/api/calls/:id/signal', (req, res) => {
+  const activeUser = resolveUser(req);
+  const call = callsList.find(c => c.id === req.params.id);
+  if (!call) return res.status(404).json({ error: 'Call session not found' });
+  if (call.callerId !== activeUser.id && call.calleeId !== activeUser.id) {
+    return res.status(403).json({ error: 'Not a call participant' });
+  }
+
+  const { status, offer, answer, candidate, role } = req.body;
+  if (offer) call.offer = offer;
+  if (answer) call.answer = answer;
+  if (candidate) {
+    if (role === 'caller' || activeUser.id === call.callerId) {
+      if (!call.callerCandidates) call.callerCandidates = [];
+      call.callerCandidates.push(candidate);
+    } else {
+      if (!call.calleeCandidates) call.calleeCandidates = [];
+      call.calleeCandidates.push(candidate);
+    }
+  }
+  if (status) {
+    call.status = status;
+    if (status === 'connected' && !call.connectedAt) {
+      call.connectedAt = new Date().toISOString();
+    }
+    if (status === 'ended' || status === 'rejected' || status === 'missed') {
+      call.endedAt = new Date().toISOString();
+      if (call.connectedAt) {
+        call.durationSeconds = Math.max(
+          1,
+          Math.round((new Date(call.endedAt).getTime() - new Date(call.connectedAt).getTime()) / 1000)
+        );
+      }
+    }
+  }
+
+  saveDb();
+  res.json({ success: true, call });
 });
 
 // 7. Communities & Groups
@@ -991,12 +1769,14 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   } else {
-    // Dynamic import vite in dev mode
+    // Dynamic import vite in dev mode with HMR disabled
+    process.env.DISABLE_HMR = 'true';
     const { createServer } = await import('vite');
     const vite = await createServer({
       server: {
         middlewareMode: true,
         hmr: false,
+        watch: null,
       },
       appType: 'spa',
     });

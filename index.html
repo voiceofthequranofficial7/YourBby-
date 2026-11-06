@@ -3,46 +3,6 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <script>
-      (function() {
-        // Intercept console.error for expected benign events (HMR WebSocket disconnection & camera permission denials)
-        const _origConsoleError = console.error;
-        console.error = function(...args) {
-          try {
-            const str = args.map(function(a) {
-              if (!a) return '';
-              if (a.message) return a.message + (a.stack || '');
-              return String(a);
-            }).join(' ');
-
-            if (
-              str.includes('WebSocket closed without opened') ||
-              str.includes('[vite]') ||
-              str.includes('Camera error') ||
-              (str.includes('Permission denied') && str.toLowerCase().includes('camera'))
-            ) {
-              console.warn(...args);
-              return;
-            }
-          } catch (_) {}
-          _origConsoleError.apply(console, args);
-        };
-
-        window.addEventListener('error', function(e) {
-          if (e && ((e.message && (e.message.includes('WebSocket') || e.message.includes('Permission denied'))) || (e.filename && e.filename.includes('@vite/client')))) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-          }
-        }, true);
-
-        window.addEventListener('unhandledrejection', function(e) {
-          if (e && e.reason && (String(e.reason).includes('WebSocket') || String(e.reason).includes('Permission denied'))) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
-          }
-        }, true);
-      })();
-    </script>
     <title>YourBby — Your World. Your People.</title>
     <meta name="description" content="Your world. Your people. The ultimate global social networking platform combining feed, stories, full-screen reels, messenger, communities, creator tools, and AI intelligence." />
     <meta property="og:title" content="YourBby — Your World. Your People." />

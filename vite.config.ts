@@ -7,6 +7,18 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(() => {
   return {
     plugins: [
+      {
+        name: 'disable-vite-client-ws-in-container',
+        enforce: 'post',
+        transform(code, id) {
+          if (id.includes('client/client.mjs')) {
+            return code.replace(
+              'const createWebSocketModuleRunnerTransport = (options) => {',
+              'const createWebSocketModuleRunnerTransport = () => ({ async connect() {}, disconnect() {}, send() {} }); const _unusedWsTransport = (options) => {'
+            );
+          }
+        },
+      },
       react(),
       tailwindcss(),
       VitePWA({

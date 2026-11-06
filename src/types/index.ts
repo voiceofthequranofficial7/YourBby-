@@ -10,6 +10,7 @@ export interface User {
   displayName: string;
   avatar: string;
   coverPhoto?: string;
+  coverPhotoURL?: string;
   bio?: string;
   location?: string;
   website?: string;
@@ -25,6 +26,7 @@ export interface User {
   isCloseFriend?: boolean;
   badge?: string;
   privacy?: 'public' | 'followers_only' | 'private';
+  lastSeen?: string;
 }
 
 export interface PollOption {
@@ -76,6 +78,14 @@ export interface Post {
   tags?: string[];
 }
 
+export interface StoryViewerEntry {
+  id: string;
+  displayName: string;
+  username: string;
+  avatar: string;
+  viewedAt: string;
+}
+
 export interface Story {
   id: string;
   author: User;
@@ -83,16 +93,33 @@ export interface Story {
   mediaType: 'image' | 'video' | 'text';
   textOverlay?: string;
   backgroundGradient?: string;
+  privacy?: 'public' | 'friends' | 'close_friends';
   createdAt: string;
   expiresAt: string;
   seen: boolean;
   viewsCount: number;
+  viewerIds?: string[];
+  viewers?: StoryViewerEntry[];
   stickers?: {
     type: 'poll' | 'location' | 'mention' | 'music';
     text?: string;
     data?: any;
   }[];
 }
+
+export type SettingsSectionId =
+  | 'account'
+  | 'privacy'
+  | 'notifications'
+  | 'messages_calls'
+  | 'audience_story'
+  | 'saved_items'
+  | 'language_appearance'
+  | 'accessibility'
+  | 'data_storage'
+  | 'blocked_users'
+  | 'help_support'
+  | 'about_yourbby';
 
 export interface Reel {
   id: string;
@@ -130,18 +157,30 @@ export interface Message {
   sender: User;
   text: string;
   mediaUrl?: string;
+  mediaUrls?: string[];
   mediaType?: 'image' | 'video' | 'voice' | 'file';
+  fileName?: string;
+  fileSize?: number;
   voiceDurationSeconds?: number;
+  voiceWaveform?: number[];
   createdAt: string;
+  deliveredAt?: string;
+  readAt?: string;
+  status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   read: boolean;
+  isEdited?: boolean;
+  editedAt?: string;
+  isDeleted?: boolean;
   reactions?: {
     emoji: string;
     userId: string;
+    userName?: string;
   }[];
   replyTo?: {
     id: string;
     senderName: string;
     text: string;
+    mediaType?: 'image' | 'video' | 'voice' | 'file';
   };
 }
 
@@ -151,11 +190,38 @@ export interface Conversation {
   name?: string;
   avatar?: string;
   participants: User[];
+  participantIds?: string[];
   lastMessage?: Message;
   unreadCount: number;
+  unreadCounts?: Record<string, number>;
   isPinned?: boolean;
+  pinnedBy?: string[];
+  isMuted?: boolean;
+  mutedBy?: string[];
   isArchived?: boolean;
+  archivedBy?: string[];
+  deletedBy?: string[];
+  typingUserIds?: string[];
   updatedAt: string;
+}
+
+export interface CallSession {
+  id: string;
+  conversationId?: string;
+  callerId: string;
+  caller: User;
+  calleeId: string;
+  callee: User;
+  type: 'audio' | 'video';
+  status: 'ringing' | 'connected' | 'rejected' | 'ended' | 'missed';
+  startedAt: string;
+  connectedAt?: string;
+  endedAt?: string;
+  durationSeconds?: number;
+  offer?: any;
+  answer?: any;
+  callerCandidates?: any[];
+  calleeCandidates?: any[];
 }
 
 export interface Group {
@@ -188,10 +254,11 @@ export interface SocialEvent {
 
 export interface NotificationItem {
   id: string;
-  type: 'like' | 'love' | 'care' | 'haha' | 'wow' | 'sad' | 'angry' | 'comment' | 'follow' | 'friend_request' | 'mention' | 'repost' | 'live' | 'admin';
+  type: 'like' | 'love' | 'care' | 'haha' | 'wow' | 'sad' | 'angry' | 'comment' | 'follow' | 'friend_request' | 'mention' | 'repost' | 'live' | 'admin' | 'message' | 'call';
   actor: User;
   postId?: string;
   reelId?: string;
+  conversationId?: string;
   text: string;
   createdAt: string;
   read: boolean;
