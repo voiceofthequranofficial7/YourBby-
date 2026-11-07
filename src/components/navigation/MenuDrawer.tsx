@@ -48,7 +48,8 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({ isOpen, onClose }) => {
     conversations,
     notifications,
     blockedUserIds,
-    setIsAuthModalOpen
+    setIsAuthModalOpen,
+    logoutUserAccount
   } = useApp();
 
   if (!isOpen) return null;
@@ -339,16 +340,28 @@ export const MenuDrawer: React.FC<MenuDrawerProps> = ({ isOpen, onClose }) => {
         <div className="p-4 mt-4 border-t border-slate-100 dark:border-slate-800 space-y-3 bg-slate-50/50 dark:bg-slate-900/50">
           <PWAInstallButton variant="prominent" />
 
-          <button
-            onClick={() => {
-              onClose();
-              setIsAuthModalOpen(true);
-            }}
-            className="w-full py-2.5 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/20 text-xs font-bold flex items-center justify-center gap-2 transition-all"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Log Out / Switch Account</span>
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => {
+                onClose();
+                setIsAuthModalOpen(true);
+              }}
+              className="py-2.5 px-3 rounded-xl bg-slate-200/70 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+            >
+              <User className="w-3.5 h-3.5" />
+              <span>Switch Account</span>
+            </button>
+            <button
+              onClick={async () => {
+                onClose();
+                await logoutUserAccount();
+              }}
+              className="py-2.5 px-3 rounded-xl bg-rose-500/10 hover:bg-rose-500 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/20 text-xs font-bold flex items-center justify-center gap-1.5 transition-all"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Log Out</span>
+            </button>
+          </div>
 
           <div className="flex items-center justify-between text-xs text-slate-500 pt-1">
             <span className="font-semibold">YourBby v2.5</span>

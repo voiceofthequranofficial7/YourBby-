@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext.tsx';
 import { auth, googleProvider } from '../../firebase/config.ts';
 import { signInWithPopup, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
@@ -6,7 +6,9 @@ import {
   X,
   Check,
   AlertCircle,
-  UserPlus
+  UserPlus,
+  LogOut,
+  LogIn
 } from 'lucide-react';
 
 interface AuthModalProps {
@@ -15,19 +17,40 @@ interface AuthModalProps {
 }
 
 export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { currentUser, allUsers, switchUserAccount, registerUserAccount } = useApp();
-  const [mode, setMode] = useState<'login' | 'register' | 'switch'>('switch');
+  const {
+    currentUser,
+    isAuthenticated,
+    allUsers,
+    switchUserAccount,
+    registerUserAccount,
+    loginUserAccount,
+    logoutUserAccount
+  } = useApp();
 
+  const [mode, setMode] = useState<'login' | 'register' | 'switch'>(() =>
+    isAuthenticated && currentUser ? 'switch' : 'login'
+  );
+
+  const [identifier, setIdentifier] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
-  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [location, setLocation] = useState('');
+  const [termsAccepted, setTermsAccepted] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  useEffect(() => {
+    if (!isAuthenticated || !currentUser) {
+      setMode(prev => (prev === 'switch' ? 'login' : prev));
+    }
+  }, [isAuthenticated, currentUser]);
+
   if (!isOpen) return null;
+
+  const canClose = Boolean(isAuthenticated && currentUser);
 
   // Firebase Google Sign-In
   const handleGoogleSignIn = async () => {
@@ -41,6 +64,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           id: user.uid,
           displayName: user.displayName || 'YourBby User',
           username: (user.email?.split('@')[0] || `user_${Date.now()}`).replace(/[^a-zA-Z0-9_]/g, ''),
+          email: user.email || undefined,
           avatar: user.photoURL || undefined,
         });
         onClose();
@@ -53,7 +77,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
-  // Registration & Email/Password Auth
+  // Registration & Email/Username/Password Auth
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -66,44 +90,99 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           setIsLoading(false);
           return;
         }
-        if (!username.trim() || !displayName.trim()) {
-          setErrorMessage('Please provide a display name and unique username.');
+        const cleanDisplay = displayName.trim();
+        const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
+        const cleanEmail = email.trim().toLowerCase();
+
+        if (!cleanDisplay) {
+          setErrorMessage('Display name is required.');
+          setIsLoading(false);
+          return;
+        }
+        if (!cleanUsername || !/^[a-zA-Z0-9_.]{3,30}$/.test(cleanUsername)) {
+          setErrorMessage('Username must be 3–30 characters (letters, numbers, dots, or underscores).');
+          setIsLoading(false);
+          return;
+        }
+        if (cleanEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+          setErrorMessage('Please enter a valid email address.');
+          setIsLoading(false);
+          return;
+        }
+        if (!password || password.length < 6) {
+          setErrorMessage('Password must be at least 6 characters long.');
           setIsLoading(false);
           return;
         }
 
         let uid = `u_${Date.now()}`;
-        if (email.trim() && password.trim()) {
+        if (cleanEmail && password) {
           try {
-            const cred = await createUserWithEmailAndPassword(auth, email, password);
+            const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
             uid = cred.user.uid;
-          } catch (_) {
-            // Continue with local/server persistent registration if Firebase email auth is not enabled
+          } catch (fbErr: any) {
+            if (fbErr?.code === 'auth/email-already-in-use') {
+              throw new Error('This email address is already registered.');
+            }
           }
         }
 
         await registerUserAccount({
           id: uid,
-          displayName: displayName.trim(),
-          username: username.trim().toLowerCase().replace(/^@/, ''),
+          displayName: cleanDisplay,
+          username: cleanUsername,
+          email: cleanEmail || undefined,
+          password,
           bio: bio.trim() || 'YourBby Member 🌐',
+          location: location.trim() || 'India'
         });
         onClose();
       } else {
-        const cred = await signInWithEmailAndPassword(auth, email, password);
-        if (cred.user) {
-          await switchUserAccount(cred.user.uid);
+        const cleanIdent = (identifier || email).trim();
+        if (!cleanIdent) {
+          setErrorMessage('Please enter your username or email address.');
+          setIsLoading(false);
+          return;
+        }
+        if (!password) {
+          setErrorMessage('Please enter your password.');
+          setIsLoading(false);
+          return;
+        }
+
+        // First verify via YourBby account backend (/api/auth/login)
+        try {
+          await loginUserAccount({
+            identifier: cleanIdent,
+            password
+          });
           onClose();
+          return;
+        } catch (localAuthErr: any) {
+          // If it's a wrong password for a known account, surface immediately
+          if (String(localAuthErr?.message || '').toLowerCase().includes('invalid password')) {
+            throw localAuthErr;
+          }
+          // Otherwise, if input looks like an email, also check Firebase Auth
+          if (cleanIdent.includes('@')) {
+            const cred = await signInWithEmailAndPassword(auth, cleanIdent, password);
+            if (cred.user) {
+              await switchUserAccount(cred.user.uid);
+              onClose();
+              return;
+            }
+          }
+          throw localAuthErr;
         }
       }
     } catch (err: any) {
       console.error('Auth Error:', err);
-      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
-        setErrorMessage('Invalid email or password.');
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        setErrorMessage('Invalid username/email or password.');
       } else if (err.code === 'auth/email-already-in-use') {
         setErrorMessage('This email address is already registered.');
       } else {
-        setErrorMessage(err.message || 'Authentication failed');
+        setErrorMessage(err.message || 'Authentication failed. Please check your credentials.');
       }
     } finally {
       setIsLoading(false);
@@ -112,6 +191,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
   const handleSwitchAccount = async (userId: string) => {
     setIsLoading(true);
+    setErrorMessage(null);
     try {
       await switchUserAccount(userId);
       onClose();
@@ -122,9 +202,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
     }
   };
 
+  const handleLogout = async () => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      await logoutUserAccount();
+      setMode('login');
+    } catch (e: any) {
+      setErrorMessage(e.message || 'Failed to log out');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 select-none">
-      <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4">
+      <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-slate-200 dark:border-slate-800 p-6 space-y-4 max-h-[92vh] overflow-y-auto">
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
           <div className="flex items-center gap-2.5">
@@ -137,13 +230,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             </div>
             <div>
               <h3 className="font-extrabold text-base text-slate-900 dark:text-white">YourBby Accounts</h3>
-              <p className="text-[10px] text-slate-400">YOUR WORLD. YOUR PEOPLE.</p>
+              <p className="text-[10px] text-slate-400">
+                {currentUser ? `Signed in as @${currentUser.username}` : 'Sign in or create an account'}
+              </p>
             </div>
           </div>
 
-          <button onClick={onClose} className="p-1 rounded-full text-slate-400 hover:text-slate-600">
-            <X className="w-5 h-5" />
-          </button>
+          {canClose && (
+            <button onClick={onClose} className="p-1 rounded-full text-slate-400 hover:text-slate-600">
+              <X className="w-5 h-5" />
+            </button>
+          )}
         </div>
 
         {/* Mode Selector */}
@@ -159,21 +256,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           </button>
           <button
             type="button"
-            onClick={() => { setMode('register'); setErrorMessage(null); }}
-            className={`flex-1 py-1.5 rounded-lg transition-all ${
-              mode === 'register' ? 'bg-white dark:bg-slate-900 text-rose-500 shadow-xs' : 'text-slate-500'
-            }`}
-          >
-            New Account
-          </button>
-          <button
-            type="button"
             onClick={() => { setMode('login'); setErrorMessage(null); }}
             className={`flex-1 py-1.5 rounded-lg transition-all ${
               mode === 'login' ? 'bg-white dark:bg-slate-900 text-rose-500 shadow-xs' : 'text-slate-500'
             }`}
           >
-            Firebase Login
+            Log In
+          </button>
+          <button
+            type="button"
+            onClick={() => { setMode('register'); setErrorMessage(null); }}
+            className={`flex-1 py-1.5 rounded-lg transition-all ${
+              mode === 'register' ? 'bg-white dark:bg-slate-900 text-rose-500 shadow-xs' : 'text-slate-500'
+            }`}
+          >
+            Register
           </button>
         </div>
 
@@ -204,72 +301,96 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
             <div className="flex items-center gap-3 my-2">
               <span className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
-              <span className="text-[10px] font-bold text-slate-400 uppercase">Or Account Details</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                {mode === 'register' ? 'Or Create New Account' : 'Or Sign In With Credentials'}
+              </span>
               <span className="flex-1 h-px bg-slate-200 dark:bg-slate-800" />
             </div>
 
             <form onSubmit={handleEmailAuth} className="space-y-3">
-              {mode === 'register' && (
+              {mode === 'register' ? (
                 <>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Display Name</label>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Display Name *</label>
                     <input
                       type="text"
                       value={displayName}
                       onChange={(e) => setDisplayName(e.target.value)}
-                      placeholder="e.g. Mohammad Siraj"
+                      placeholder="e.g. Aarav Sharma"
                       required
                       className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Unique Username</label>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Unique Username *</label>
                     <input
                       type="text"
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
-                      placeholder="e.g. mohammadsiraj"
+                      placeholder="e.g. aarav_sharma"
                       required
                       className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Bio (Optional)</label>
+                    <label className="text-[11px] font-bold text-slate-500 block mb-1">Email Address</label>
                     <input
-                      type="text"
-                      value={bio}
-                      onChange={(e) => setBio(e.target.value)}
-                      placeholder="Tell people about yourself..."
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      placeholder="name@domain.com"
                       className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
                     />
                   </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 block mb-1">Bio</label>
+                      <input
+                        type="text"
+                        value={bio}
+                        onChange={(e) => setBio(e.target.value)}
+                        placeholder="Creator & Explorer..."
+                        className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-[11px] font-bold text-slate-500 block mb-1">Location</label>
+                      <input
+                        type="text"
+                        value={location}
+                        onChange={(e) => setLocation(e.target.value)}
+                        placeholder="Mumbai, India"
+                        className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
+                      />
+                    </div>
+                  </div>
                 </>
+              ) : (
+                <div>
+                  <label className="text-[11px] font-bold text-slate-500 block mb-1">
+                    Username or Email Address *
+                  </label>
+                  <input
+                    type="text"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder="e.g. mohammadsiraj or name@domain.com"
+                    required
+                    className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
+                  />
+                </div>
               )}
 
               <div>
                 <label className="text-[11px] font-bold text-slate-500 block mb-1">
-                  Email Address {mode === 'register' ? '(Optional for local session)' : ''}
-                </label>
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="name@domain.com"
-                  required={mode === 'login'}
-                  className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-500 block mb-1">
-                  Password {mode === 'register' ? '(Optional for local session)' : ''}
+                  Password * {mode === 'register' ? '(min 6 characters)' : ''}
                 </label>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  required={mode === 'login'}
+                  required
                   className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-xs text-slate-900 dark:text-white focus:outline-none"
                 />
               </div>
@@ -292,9 +413,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               <button
                 type="submit"
                 disabled={isLoading}
-                className="w-full py-2.5 bg-gradient-to-r from-rose-500 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-500/20"
+                className="w-full py-2.5 bg-gradient-to-r from-rose-500 to-indigo-600 text-white rounded-xl text-xs font-bold shadow-md shadow-rose-500/20 flex items-center justify-center gap-1.5"
               >
-                {isLoading ? 'Processing...' : mode === 'register' ? 'Create Real Account' : 'Log In'}
+                <LogIn className="w-4 h-4" />
+                <span>{isLoading ? 'Processing...' : mode === 'register' ? 'Create Real Account' : 'Log In'}</span>
               </button>
             </form>
           </div>
@@ -304,7 +426,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         {mode === 'switch' && (
           <div className="space-y-3">
             <p className="text-xs text-slate-500">
-              Switch between registered accounts to test real two-way messaging, read receipts, and WebRTC calls:
+              Switch between registered accounts or log out of your active session:
             </p>
 
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
@@ -347,14 +469,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               })}
             </div>
 
-            <button
-              type="button"
-              onClick={() => setMode('register')}
-              className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-xs font-bold text-rose-500 hover:bg-rose-500/5 flex items-center justify-center gap-1.5 transition"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>Register Another User Account</span>
-            </button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setMode('register')}
+                className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 text-xs font-bold text-rose-500 hover:bg-rose-500/5 flex items-center justify-center gap-1.5 transition"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>Register Account</span>
+              </button>
+
+              {currentUser && (
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  disabled={isLoading}
+                  className="w-full py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500 text-rose-600 dark:text-rose-400 hover:text-white border border-rose-500/20 text-xs font-bold flex items-center justify-center gap-1.5 transition"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Log Out</span>
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

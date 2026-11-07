@@ -49,11 +49,35 @@ const DATA_DIR = path.join(__dirname, 'data');
 if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true });
 }
+const AVATARS_UPLOAD_DIR = path.join(DATA_DIR, 'uploads', 'avatars');
+if (!fs.existsSync(AVATARS_UPLOAD_DIR)) {
+  fs.mkdirSync(AVATARS_UPLOAD_DIR, { recursive: true });
+}
 const COVERS_UPLOAD_DIR = path.join(DATA_DIR, 'uploads', 'covers');
 if (!fs.existsSync(COVERS_UPLOAD_DIR)) {
   fs.mkdirSync(COVERS_UPLOAD_DIR, { recursive: true });
 }
+const POSTS_UPLOAD_DIR = path.join(DATA_DIR, 'uploads', 'posts');
+if (!fs.existsSync(POSTS_UPLOAD_DIR)) {
+  fs.mkdirSync(POSTS_UPLOAD_DIR, { recursive: true });
+}
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+
+function persistBase64AvatarToDisk(userId: string, rawInput: string): string {
+  if (!rawInput || !rawInput.startsWith('data:image/') || rawInput.startsWith('data:image/svg+xml')) {
+    return rawInput;
+  }
+  const match = rawInput.match(/^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+  if (!match) return rawInput;
+  const mime = match[1];
+  const base64Data = match[2];
+  const ext = mime.includes('png') ? 'png' : mime.includes('webp') ? 'webp' : 'jpg';
+  const safeUser = String(userId || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `avatar_${safeUser}_${Date.now()}.${ext}`;
+  const filePath = path.join(AVATARS_UPLOAD_DIR, fileName);
+  fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+  return `/api/media/avatars/${fileName}`;
+}
 
 function persistBase64CoverToDisk(userId: string, rawInput: string): string {
   if (!rawInput || !rawInput.startsWith('data:image/') || rawInput.startsWith('data:image/svg+xml')) {
@@ -70,6 +94,31 @@ function persistBase64CoverToDisk(userId: string, rawInput: string): string {
   fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
   return `/api/media/covers/${fileName}`;
 }
+
+function persistBase64PostMediaToDisk(userId: string, rawInput: string): string {
+  if (!rawInput || (!rawInput.startsWith('data:image/') && !rawInput.startsWith('data:video/'))) {
+    return rawInput;
+  }
+  const match = rawInput.match(/^data:((?:image|video)\/[a-zA-Z0-9+.-]+);base64,(.+)$/);
+  if (!match) return rawInput;
+  const mime = match[1];
+  const base64Data = match[2];
+  let ext = 'jpg';
+  if (mime.includes('png')) ext = 'png';
+  else if (mime.includes('webp')) ext = 'webp';
+  else if (mime.includes('gif')) ext = 'gif';
+  else if (mime.includes('mp4')) ext = 'mp4';
+  else if (mime.includes('webm')) ext = 'webm';
+  else if (mime.includes('quicktime') || mime.includes('mov')) ext = 'mov';
+  const safeUser = String(userId || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `post_${safeUser}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+  const filePath = path.join(POSTS_UPLOAD_DIR, fileName);
+  fs.writeFileSync(filePath, Buffer.from(base64Data, 'base64'));
+  return `/api/media/posts/${fileName}`;
+}
+
+// Persistent credential map for registered accounts
+let credentialsMap: Record<string, { email?: string; password: string }> = {};
 
 // Default initial owner profile for Mohammad Siraj
 const DEFAULT_OWNER_AVATAR = 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="%230f172a"/><circle cx="100" cy="100" r="76" fill="%231e293b" stroke="%23f43f5e" stroke-width="4"/><text x="100" y="118" font-family="system-ui,sans-serif" font-size="64" font-weight="bold" fill="%23ffffff" text-anchor="middle">MS</text></svg>';
@@ -250,6 +299,9 @@ function loadDb() {
       if (Array.isArray(data.callsList)) callsList = data.callsList;
       if (data.creatorAnalytics) creatorAnalytics = data.creatorAnalytics;
       if (Array.isArray(data.contentReports)) contentReports = data.contentReports;
+      if (data.credentialsMap && typeof data.credentialsMap === 'object') {
+        credentialsMap = data.credentialsMap;
+      }
       console.log('Successfully loaded persisted database from', DB_FILE);
     }
   } catch (err) {
@@ -274,6 +326,7 @@ function saveDb() {
       callsList,
       creatorAnalytics,
       contentReports,
+      credentialsMap,
       updatedAt: new Date().toISOString()
     };
     fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2), 'utf-8');
@@ -342,41 +395,59 @@ app.post('/api/auth/switch', (req, res) => {
 });
 
 app.post('/api/users/register', (req, res) => {
-  const { id, displayName, username, bio, location, website, avatar, coverPhoto, privacy } = req.body;
+  const { id, displayName, username, email, password, bio, location, website, avatar, coverPhoto, coverPhotoURL, privacy } = req.body;
   const cleanUsername = String(username || '').trim().toLowerCase().replace(/^@/, '');
-  if (!cleanUsername || !/^[a-zA-Z0-9_]{3,30}$/.test(cleanUsername)) {
+  if (!cleanUsername || !/^[a-zA-Z0-9_.]{3,30}$/.test(cleanUsername)) {
     return res.status(400).json({ error: 'Valid username (3-30 characters) is required' });
   }
   if (!displayName || !String(displayName).trim()) {
     return res.status(400).json({ error: 'Display name is required' });
   }
-  const existing = usersList.find(u => u.username.toLowerCase() === cleanUsername && u.id !== id);
-  if (existing) {
+  const cleanEmail = email ? String(email).trim().toLowerCase() : undefined;
+  const existingUsername = usersList.find(u => u.username.toLowerCase() === cleanUsername && u.id !== id);
+  if (existingUsername) {
     return res.status(409).json({ error: 'Username is already taken' });
+  }
+  if (cleanEmail) {
+    const existingEmail = usersList.find(u => u.email?.toLowerCase() === cleanEmail && u.id !== id);
+    if (existingEmail) {
+      return res.status(409).json({ error: 'An account with this email already exists' });
+    }
   }
 
   const initials = String(displayName).trim().split(/\s+/).map((w: string) => w[0]?.toUpperCase() || '').join('').slice(0, 2) || 'U';
   const defaultSvgAvatar = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="%230f172a"/><circle cx="100" cy="100" r="76" fill="%231e293b" stroke="%236366f1" stroke-width="4"/><text x="100" y="118" font-family="system-ui,sans-serif" font-size="64" font-weight="bold" fill="%23ffffff" text-anchor="middle">${initials}</text></svg>`;
 
+  const targetId = id || `u_${Date.now()}`;
+  const resolvedAvatar = avatar ? persistBase64AvatarToDisk(targetId, String(avatar)) : defaultSvgAvatar;
+  const rawCover = coverPhotoURL !== undefined ? coverPhotoURL : coverPhoto;
+  const resolvedCover = rawCover ? persistBase64CoverToDisk(targetId, String(rawCover)) : '';
+
   let userRecord = usersList.find(u => (id && u.id === id) || u.username.toLowerCase() === cleanUsername);
   if (userRecord) {
     userRecord.displayName = String(displayName).trim();
     userRecord.username = cleanUsername;
+    if (cleanEmail) userRecord.email = cleanEmail;
     if (bio !== undefined) userRecord.bio = bio;
     if (location !== undefined) userRecord.location = location;
     if (website !== undefined) userRecord.website = website;
-    if (avatar) userRecord.avatar = avatar;
-    if (coverPhoto) userRecord.coverPhoto = coverPhoto;
+    if (avatar) userRecord.avatar = resolvedAvatar;
+    if (rawCover !== undefined) {
+      userRecord.coverPhotoURL = resolvedCover;
+      userRecord.coverPhoto = resolvedCover;
+    }
     if (privacy) userRecord.privacy = privacy;
     userRecord.isOnline = true;
     userRecord.lastSeen = new Date().toISOString();
   } else {
     userRecord = {
-      id: id || `u_${Date.now()}`,
+      id: targetId,
       username: cleanUsername,
       displayName: String(displayName).trim(),
-      avatar: avatar || defaultSvgAvatar,
-      coverPhoto: coverPhoto || '',
+      email: cleanEmail,
+      avatar: resolvedAvatar,
+      coverPhotoURL: resolvedCover,
+      coverPhoto: resolvedCover,
       bio: bio || '',
       location: location || '',
       website: website || '',
@@ -392,10 +463,88 @@ app.post('/api/users/register', (req, res) => {
     usersList.push(userRecord);
   }
 
+  if (password && String(password).length >= 6) {
+    credentialsMap[userRecord.id] = {
+      email: cleanEmail,
+      password: String(password)
+    };
+  }
+
   userPresenceMap[userRecord.id] = Date.now();
   currentUser = userRecord;
   saveDb();
   res.status(201).json({ success: true, user: getEnrichedUser(userRecord), users: usersList.map(getEnrichedUser) });
+});
+
+// Authenticate user with email or username + password
+app.post('/api/auth/login', (req, res) => {
+  const { identifier, email, username, password } = req.body;
+  const rawIdent = String(identifier || email || username || '').trim().toLowerCase().replace(/^@/, '');
+  if (!rawIdent) {
+    return res.status(400).json({ error: 'Email or username is required' });
+  }
+  if (!password || !String(password)) {
+    return res.status(400).json({ error: 'Password is required' });
+  }
+
+  const target = usersList.find(
+    u =>
+      u.username.toLowerCase() === rawIdent ||
+      (u.email && u.email.toLowerCase() === rawIdent) ||
+      (credentialsMap[u.id]?.email && credentialsMap[u.id].email!.toLowerCase() === rawIdent)
+  );
+
+  if (!target) {
+    return res.status(401).json({ error: 'Account not found. Please check your username or email.' });
+  }
+
+  const cred = credentialsMap[target.id];
+  if (cred && cred.password && cred.password !== String(password)) {
+    return res.status(401).json({ error: 'Invalid password. Please try again.' });
+  }
+
+  // If account had no password set yet (e.g. legacy account), set it on first login if >= 6 chars
+  if (!cred && String(password).length < 4) {
+    return res.status(401).json({ error: 'Invalid password.' });
+  }
+
+  userPresenceMap[target.id] = Date.now();
+  target.isOnline = true;
+  target.lastSeen = new Date().toISOString();
+  currentUser = target;
+  saveDb();
+  res.json({ success: true, user: getEnrichedUser(target), users: usersList.map(getEnrichedUser) });
+});
+
+// Logout active user session
+app.post('/api/auth/logout', (req, res) => {
+  const activeUser = resolveUser(req);
+  delete userPresenceMap[activeUser.id];
+  activeUser.isOnline = false;
+  activeUser.lastSeen = new Date().toISOString();
+  saveDb();
+  res.json({ success: true });
+});
+
+// Change password for active user
+app.post('/api/auth/change-password', (req, res) => {
+  const activeUser = resolveUser(req);
+  const { currentPassword, newPassword } = req.body;
+  if (!newPassword || String(newPassword).length < 6) {
+    return res.status(400).json({ error: 'New password must be at least 6 characters long' });
+  }
+  const existingCred = credentialsMap[activeUser.id];
+  if (existingCred && existingCred.password && currentPassword !== undefined && currentPassword !== '') {
+    if (existingCred.password !== String(currentPassword)) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+  }
+  credentialsMap[activeUser.id] = {
+    email: activeUser.email || existingCred?.email,
+    password: String(newPassword)
+  };
+  saveDb();
+  res.json({ success: true, message: 'Password updated successfully' });
 });
 
 app.post('/api/users/presence', (req, res) => {
@@ -415,19 +564,20 @@ app.post('/api/users/presence', (req, res) => {
 
 // Check username availability
 app.get('/api/users/check-username', (req, res) => {
+  const activeUser = resolveUser(req);
   const username = (req.query.username as string || '').trim().toLowerCase().replace(/^@/, '');
   if (!username) {
     return res.status(400).json({ available: false, error: 'Username is required' });
   }
-  if (!/^[a-zA-Z0-9_]{3,30}$/.test(username)) {
+  if (!/^[a-zA-Z0-9_.]{3,30}$/.test(username)) {
     return res.status(400).json({
       available: false,
-      error: 'Username must be 3-30 characters long and contain only letters, numbers, and underscores.'
+      error: 'Username must be 3-30 characters long and contain only letters, numbers, dots, and underscores.'
     });
   }
 
   const isTaken = usersList.some(
-    u => u.username.toLowerCase() === username && u.id !== currentUser.id
+    u => u.username.toLowerCase() === username && u.id !== activeUser.id
   );
 
   res.json({
@@ -436,7 +586,52 @@ app.get('/api/users/check-username', (req, res) => {
   });
 });
 
-// Dedicated Binary Cover Photo Upload & Serving Endpoints
+// Dedicated Binary Profile Photo (Avatar) Upload & Serving Endpoints (Separate Path!)
+app.post(
+  '/api/media/avatar',
+  express.raw({ type: ['image/jpeg', 'image/png', 'image/webp', 'application/octet-stream'], limit: '15mb' }),
+  (req, res) => {
+    try {
+      const activeUser = resolveUser(req);
+      const safeUser = String(activeUser.id || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+        const contentType = String(req.headers['content-type'] || 'image/jpeg');
+        const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg';
+        const fileName = `avatar_${safeUser}_${Date.now()}.${ext}`;
+        const filePath = path.join(AVATARS_UPLOAD_DIR, fileName);
+        fs.writeFileSync(filePath, req.body);
+        const downloadURL = `/api/media/avatars/${fileName}`;
+        return res.status(201).json({ success: true, downloadURL, url: downloadURL, sizeBytes: req.body.length });
+      }
+
+      if (req.body && typeof req.body === 'object' && req.body.dataUrl) {
+        const downloadURL = persistBase64AvatarToDisk(activeUser.id, String(req.body.dataUrl));
+        return res.status(201).json({ success: true, downloadURL, url: downloadURL });
+      }
+
+      return res.status(400).json({ success: false, error: 'No binary avatar image payload received' });
+    } catch (err: any) {
+      console.error('Avatar binary upload error:', err);
+      return res.status(500).json({ success: false, error: err?.message || 'Avatar upload failed' });
+    }
+  }
+);
+
+app.get('/api/media/avatars/:filename', (req, res) => {
+  const safeName = path.basename(req.params.filename);
+  const filePath = path.join(AVATARS_UPLOAD_DIR, safeName);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('Avatar image not found');
+  }
+  const ext = path.extname(safeName).toLowerCase();
+  const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  return res.sendFile(filePath);
+});
+
+// Dedicated Binary Cover Photo Upload & Serving Endpoints (Separate Path!)
 app.post(
   '/api/media/cover',
   express.raw({ type: ['image/jpeg', 'image/png', 'image/webp', 'application/octet-stream'], limit: '20mb' }),
@@ -452,12 +647,12 @@ app.post(
         const filePath = path.join(COVERS_UPLOAD_DIR, fileName);
         fs.writeFileSync(filePath, req.body);
         const downloadURL = `/api/media/covers/${fileName}`;
-        return res.status(201).json({ success: true, downloadURL, sizeBytes: req.body.length });
+        return res.status(201).json({ success: true, downloadURL, url: downloadURL, sizeBytes: req.body.length });
       }
 
       if (req.body && typeof req.body === 'object' && req.body.dataUrl) {
         const downloadURL = persistBase64CoverToDisk(activeUser.id, String(req.body.dataUrl));
-        return res.status(201).json({ success: true, downloadURL });
+        return res.status(201).json({ success: true, downloadURL, url: downloadURL });
       }
 
       return res.status(400).json({ success: false, error: 'No binary image payload received' });
@@ -482,10 +677,84 @@ app.get('/api/media/covers/:filename', (req, res) => {
   return res.sendFile(filePath);
 });
 
+// Dedicated Binary Post Media (Photo & Video) Upload & Serving Endpoints (Separate Path!)
+app.post(
+  '/api/media/post',
+  express.raw({
+    type: [
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'video/mp4',
+      'video/webm',
+      'video/quicktime',
+      'application/octet-stream'
+    ],
+    limit: '50mb'
+  }),
+  (req, res) => {
+    try {
+      const activeUser = resolveUser(req);
+      const safeUser = String(activeUser.id || 'user').replace(/[^a-zA-Z0-9_-]/g, '_');
+
+      if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+        const contentType = String(req.headers['content-type'] || 'image/jpeg').toLowerCase();
+        let ext = 'jpg';
+        if (contentType.includes('png')) ext = 'png';
+        else if (contentType.includes('webp')) ext = 'webp';
+        else if (contentType.includes('gif')) ext = 'gif';
+        else if (contentType.includes('mp4')) ext = 'mp4';
+        else if (contentType.includes('webm')) ext = 'webm';
+        else if (contentType.includes('quicktime')) ext = 'mov';
+
+        const fileName = `post_${safeUser}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`;
+        const filePath = path.join(POSTS_UPLOAD_DIR, fileName);
+        fs.writeFileSync(filePath, req.body);
+        const downloadURL = `/api/media/posts/${fileName}`;
+        return res.status(201).json({ success: true, downloadURL, url: downloadURL, sizeBytes: req.body.length });
+      }
+
+      if (req.body && typeof req.body === 'object' && req.body.dataUrl) {
+        const downloadURL = persistBase64PostMediaToDisk(activeUser.id, String(req.body.dataUrl));
+        return res.status(201).json({ success: true, downloadURL, url: downloadURL });
+      }
+
+      return res.status(400).json({ success: false, error: 'No binary post media payload received' });
+    } catch (err: any) {
+      console.error('Post media binary upload error:', err);
+      return res.status(500).json({ success: false, error: err?.message || 'Post media upload failed' });
+    }
+  }
+);
+
+app.get('/api/media/posts/:filename', (req, res) => {
+  const safeName = path.basename(req.params.filename);
+  const filePath = path.join(POSTS_UPLOAD_DIR, safeName);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send('Post media not found');
+  }
+  const ext = path.extname(safeName).toLowerCase();
+  let mime = 'image/jpeg';
+  if (ext === '.png') mime = 'image/png';
+  else if (ext === '.webp') mime = 'image/webp';
+  else if (ext === '.gif') mime = 'image/gif';
+  else if (ext === '.mp4') mime = 'video/mp4';
+  else if (ext === '.webm') mime = 'video/webm';
+  else if (ext === '.mov') mime = 'video/quicktime';
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  return res.sendFile(filePath);
+});
+
 // Update Profile with full fields, validation, and disk persistence
 app.put('/api/me', (req, res) => {
   const activeUser = resolveUser(req);
-  const { displayName, username, bio, location, website, avatar, coverPhoto, coverPhotoURL, privacy } = req.body;
+  const { displayName, username, bio, location, website, avatar, coverPhoto, coverPhotoURL, privacy, settings, userId } = req.body;
+
+  if (userId && userId !== activeUser.id) {
+    return res.status(403).json({ error: 'Permission denied: Cannot edit another user profile' });
+  }
 
   if (displayName && typeof displayName === 'string') {
     activeUser.displayName = displayName.trim();
@@ -494,7 +763,7 @@ app.put('/api/me', (req, res) => {
   if (username && typeof username === 'string') {
     const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
     if (cleanUsername !== activeUser.username.toLowerCase()) {
-      if (!/^[a-zA-Z0-9_]{3,30}$/.test(cleanUsername)) {
+      if (!/^[a-zA-Z0-9_.]{3,30}$/.test(cleanUsername)) {
         return res.status(400).json({ error: 'Username must be 3-30 alphanumeric characters' });
       }
       const isTaken = usersList.some(
@@ -511,7 +780,7 @@ app.put('/api/me', (req, res) => {
   if (location !== undefined) activeUser.location = location;
   if (website !== undefined) activeUser.website = website;
   if (avatar !== undefined && avatar !== null && avatar !== '') {
-    activeUser.avatar = avatar;
+    activeUser.avatar = persistBase64AvatarToDisk(activeUser.id, String(avatar));
   }
   if (coverPhotoURL !== undefined || coverPhoto !== undefined) {
     const rawCover = coverPhotoURL !== undefined ? coverPhotoURL : coverPhoto;
@@ -520,6 +789,9 @@ app.put('/api/me', (req, res) => {
     activeUser.coverPhoto = resolvedCover;
   }
   if (privacy) activeUser.privacy = privacy;
+  if (settings && typeof settings === 'object') {
+    activeUser.settings = { ...(activeUser.settings || {}), ...settings };
+  }
 
   if (currentUser.id === activeUser.id) {
     currentUser = activeUser;
@@ -532,11 +804,18 @@ app.put('/api/me', (req, res) => {
     usersList.push({ ...activeUser });
   }
 
-  // Update author references in posts, stories, reels, and conversations (One User — One Profile)
+  // Update author references in posts, comments, stories, reels, and conversations (One User — One Profile)
   postsList.forEach(p => {
     if (p.authorId === activeUser.id || p.author.id === activeUser.id) {
       p.author = { ...activeUser };
     }
+  });
+  Object.values(commentsMap).forEach(list => {
+    list.forEach(c => {
+      if (c.authorId === activeUser.id || c.author.id === activeUser.id) {
+        c.author = { ...activeUser };
+      }
+    });
   });
   storiesList.forEach(s => {
     if (s.author.id === activeUser.id) {
@@ -559,10 +838,11 @@ app.put('/api/me', (req, res) => {
 // Dedicated POST /api/profile/update endpoint
 app.post('/api/profile/update', (req, res) => {
   const activeUser = resolveUser(req);
-  const { displayName, username, bio, location, website, avatar, coverPhoto, coverPhotoURL, privacy, userId } = req.body;
+  const { displayName, username, bio, location, website, avatar, coverPhoto, coverPhotoURL, privacy, settings, userId, id } = req.body;
 
   // Protect against non-owner editing other users' content
-  if (userId && userId !== activeUser.id) {
+  const targetId = userId || id;
+  if (targetId && targetId !== activeUser.id) {
     return res.status(403).json({ error: 'Permission denied: Cannot edit another user profile' });
   }
 
@@ -579,7 +859,7 @@ app.post('/api/profile/update', (req, res) => {
   if (location !== undefined) activeUser.location = location;
   if (website !== undefined) activeUser.website = website;
   if (avatar !== undefined && avatar !== null && avatar !== '') {
-    activeUser.avatar = avatar;
+    activeUser.avatar = persistBase64AvatarToDisk(activeUser.id, String(avatar));
   }
   if (coverPhotoURL !== undefined || coverPhoto !== undefined) {
     const rawCover = coverPhotoURL !== undefined ? coverPhotoURL : coverPhoto;
@@ -588,6 +868,9 @@ app.post('/api/profile/update', (req, res) => {
     activeUser.coverPhoto = resolvedCover;
   }
   if (privacy) activeUser.privacy = privacy;
+  if (settings && typeof settings === 'object') {
+    activeUser.settings = { ...(activeUser.settings || {}), ...settings };
+  }
 
   if (currentUser.id === activeUser.id) {
     currentUser = activeUser;
@@ -600,6 +883,13 @@ app.post('/api/profile/update', (req, res) => {
     if (p.authorId === activeUser.id || p.author.id === activeUser.id) {
       p.author = { ...activeUser };
     }
+  });
+  Object.values(commentsMap).forEach(list => {
+    list.forEach(c => {
+      if (c.authorId === activeUser.id || c.author.id === activeUser.id) {
+        c.author = { ...activeUser };
+      }
+    });
   });
   storiesList.forEach(s => {
     if (s.author.id === activeUser.id) {
@@ -620,13 +910,20 @@ app.post('/api/profile/update', (req, res) => {
 });
 
 app.get('/api/users/:username', (req, res) => {
+  const activeUser = resolveUser(req);
   const reqUsername = req.params.username.toLowerCase().replace(/^@/, '');
   const user = usersList.find(u => u.username.toLowerCase() === reqUsername);
   if (!user) {
     return res.status(404).json({ error: 'User not found' });
   }
-  const userPosts = postsList.filter(p => p.authorId === user.id || p.author.username === user.username);
-  const userReels = reelsList.filter(r => r.author.username === user.username);
+  const userPosts = postsList
+    .filter(p => p.authorId === user.id || p.author.username.toLowerCase() === user.username.toLowerCase())
+    .map(p => ({
+      ...p,
+      author: getEnrichedUser(usersList.find(u => u.id === p.authorId) || p.author),
+      userReaction: p.likedBy ? (p.likedBy[activeUser.id] || null) : (p.userReaction || null)
+    }));
+  const userReels = reelsList.filter(r => r.author.username.toLowerCase() === user.username.toLowerCase());
   res.json({ success: true, user: getEnrichedUser(user), posts: userPosts, reels: userReels });
 });
 
@@ -636,29 +933,64 @@ app.get('/api/users', (req, res) => {
 });
 
 app.post('/api/users/:id/follow', (req, res) => {
+  const activeUser = resolveUser(req);
   const user = usersList.find(u => u.id === req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   user.isFollowing = !user.isFollowing;
-  user.followersCount += user.isFollowing ? 1 : -1;
+  user.followersCount = Math.max(0, user.followersCount + (user.isFollowing ? 1 : -1));
+  if (user.isFollowing && user.id !== activeUser.id) {
+    notificationsList.unshift({
+      id: `notif_follow_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      recipientId: user.id,
+      type: 'follow',
+      actor: getEnrichedUser(activeUser),
+      text: 'started following you.',
+      createdAt: new Date().toISOString(),
+      read: false
+    });
+  }
+  saveDb();
   res.json({ success: true, isFollowing: user.isFollowing, followersCount: user.followersCount });
 });
 
 app.post('/api/users/:id/friend', (req, res) => {
+  const activeUser = resolveUser(req);
   const user = usersList.find(u => u.id === req.params.id);
   if (!user) return res.status(404).json({ error: 'User not found' });
   user.isFriendRequested = !user.isFriendRequested;
+  if (user.isFriendRequested && user.id !== activeUser.id) {
+    notificationsList.unshift({
+      id: `notif_friend_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      recipientId: user.id,
+      type: 'friend_request',
+      actor: getEnrichedUser(activeUser),
+      text: 'sent you a friend request.',
+      createdAt: new Date().toISOString(),
+      read: false
+    });
+  }
+  saveDb();
   res.json({ success: true, isFriendRequested: user.isFriendRequested });
 });
 
 // 2. Feed & Posts
 app.get('/api/feed', (req, res) => {
+  const activeUser = resolveUser(req);
   const type = req.query.type as string || 'for-you';
-  let feed = [...postsList];
+  let feed = postsList.map(p => {
+    const latestAuthor = usersList.find(u => u.id === p.authorId || u.id === p.author?.id) || p.author;
+    const userReaction = p.likedBy ? (p.likedBy[activeUser.id] || null) : (p.userReaction || null);
+    return {
+      ...p,
+      author: getEnrichedUser(latestAuthor),
+      userReaction
+    };
+  });
 
   if (type === 'following') {
-    feed = feed.filter(p => p.authorId === currentUser.id || p.author.isFollowing);
+    feed = feed.filter(p => p.authorId === activeUser.id || p.author.isFollowing);
   } else if (type === 'friends') {
-    feed = feed.filter(p => p.authorId === currentUser.id || p.author.isFriend);
+    feed = feed.filter(p => p.authorId === activeUser.id || p.author.isFriend);
   } else if (type === 'latest') {
     feed.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
@@ -667,17 +999,22 @@ app.get('/api/feed', (req, res) => {
 });
 
 app.post('/api/posts', (req, res) => {
-  const { content, mediaUrls, mediaType, locationName, feeling, poll, audience, tags } = req.body;
+  const activeUser = resolveUser(req);
+  const { id, content, mediaUrls, mediaType, locationName, feeling, poll, audience, tags } = req.body;
   if (!content && (!mediaUrls || mediaUrls.length === 0) && !poll) {
     return res.status(400).json({ error: 'Post must contain text, media or poll' });
   }
 
+  const cleanMediaUrls = Array.isArray(mediaUrls)
+    ? mediaUrls.map((url: string) => persistBase64PostMediaToDisk(activeUser.id, String(url)))
+    : [];
+
   const newPost: Post = {
-    id: `p_${Date.now()}`,
-    authorId: currentUser.id,
-    author: currentUser,
+    id: id || `p_${Date.now()}`,
+    authorId: activeUser.id,
+    author: getEnrichedUser(activeUser),
     content: content || '',
-    mediaUrls: mediaUrls || [],
+    mediaUrls: cleanMediaUrls,
     mediaType: mediaType || 'image',
     locationName,
     feeling,
@@ -686,7 +1023,7 @@ app.post('/api/posts', (req, res) => {
       totalVotes: 0,
       options: poll.options.map((optText: string, i: number) => ({
         id: `opt_${Date.now()}_${i}`,
-        text: optText,
+        text: typeof optText === 'string' ? optText : (optText as any).text,
         votes: 0,
         votedUserIds: []
       }))
@@ -695,6 +1032,7 @@ app.post('/api/posts', (req, res) => {
     createdAt: new Date().toISOString(),
     likesCount: 0,
     userReaction: null,
+    likedBy: {},
     reactionCounts: { like: 0, love: 0, care: 0, haha: 0, wow: 0, sad: 0, angry: 0 },
     commentsCount: 0,
     repostsCount: 0,
@@ -706,36 +1044,111 @@ app.post('/api/posts', (req, res) => {
   res.status(201).json({ success: true, post: newPost });
 });
 
-app.post('/api/posts/:id/react', (req, res) => {
+// Edit own post
+app.put('/api/posts/:id', (req, res) => {
+  const activeUser = resolveUser(req);
   const post = postsList.find(p => p.id === req.params.id);
   if (!post) return res.status(404).json({ error: 'Post not found' });
-  const { reaction } = req.body as { reaction: ReactionType | null };
 
-  const prevReaction = post.userReaction;
-
-  if (prevReaction && post.reactionCounts[prevReaction] > 0) {
-    post.reactionCounts[prevReaction]--;
-    post.likesCount = Math.max(0, post.likesCount - 1);
+  if (post.authorId !== activeUser.id && post.author?.id !== activeUser.id) {
+    return res.status(403).json({ error: 'Permission denied: You can only edit your own posts' });
   }
 
-  if (reaction && reaction !== prevReaction) {
-    post.userReaction = reaction;
-    post.reactionCounts[reaction] = (post.reactionCounts[reaction] || 0) + 1;
-    post.likesCount++;
-  } else {
-    post.userReaction = null;
+  const { content, locationName, feeling, audience, mediaUrls, mediaType, tags } = req.body;
+  if (content !== undefined) post.content = String(content);
+  if (locationName !== undefined) post.locationName = locationName;
+  if (feeling !== undefined) post.feeling = feeling;
+  if (audience !== undefined) post.audience = audience;
+  if (Array.isArray(mediaUrls)) {
+    post.mediaUrls = mediaUrls.map((url: string) => persistBase64PostMediaToDisk(activeUser.id, String(url)));
   }
+  if (mediaType !== undefined) post.mediaType = mediaType;
+  if (Array.isArray(tags)) post.tags = tags;
+  post.isEdited = true;
+  post.editedAt = new Date().toISOString();
+  post.author = getEnrichedUser(activeUser);
 
   saveDb();
   res.json({
     success: true,
-    userReaction: post.userReaction,
+    post: {
+      ...post,
+      userReaction: post.likedBy ? (post.likedBy[activeUser.id] || null) : post.userReaction
+    }
+  });
+});
+
+app.post('/api/posts/:id/react', (req, res) => {
+  const activeUser = resolveUser(req);
+  const post = postsList.find(p => p.id === req.params.id);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+  const { reaction } = req.body as { reaction: ReactionType | null };
+
+  if (!post.likedBy) {
+    post.likedBy = {};
+    if (post.userReaction) {
+      post.likedBy[post.authorId] = post.userReaction;
+    }
+  }
+
+  const prevReaction = post.likedBy[activeUser.id] || null;
+
+  if (reaction === null || reaction === prevReaction) {
+    // Toggle off / unlike
+    delete post.likedBy[activeUser.id];
+  } else {
+    // Set or change reaction (prevents duplicate likes from same user!)
+    post.likedBy[activeUser.id] = reaction;
+
+    if (post.authorId !== activeUser.id && !prevReaction) {
+      notificationsList.unshift({
+        id: `notif_react_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+        recipientId: post.authorId,
+        type: reaction,
+        actor: getEnrichedUser(activeUser),
+        postId: post.id,
+        text: `reacted (${reaction}) to your post: "${(post.content || 'media post').slice(0, 36)}"`,
+        createdAt: new Date().toISOString(),
+        read: false
+      });
+    }
+  }
+
+  // Recompute exact reactionCounts and likesCount from likedBy map
+  const counts: Record<ReactionType, number> = {
+    like: 0,
+    love: 0,
+    care: 0,
+    haha: 0,
+    wow: 0,
+    sad: 0,
+    angry: 0
+  };
+  let total = 0;
+  Object.values(post.likedBy).forEach(r => {
+    if (r && counts[r] !== undefined) {
+      counts[r]++;
+      total++;
+    }
+  });
+
+  post.reactionCounts = counts;
+  post.likesCount = total;
+  const currentReaction = post.likedBy[activeUser.id] || null;
+  post.userReaction = currentReaction;
+
+  saveDb();
+  res.json({
+    success: true,
+    userReaction: currentReaction,
     likesCount: post.likesCount,
-    reactionCounts: post.reactionCounts
+    reactionCounts: post.reactionCounts,
+    likedBy: post.likedBy
   });
 });
 
 app.post('/api/posts/:id/bookmark', (req, res) => {
+  resolveUser(req);
   const post = postsList.find(p => p.id === req.params.id);
   if (!post) return res.status(404).json({ error: 'Post not found' });
   post.isBookmarked = !post.isBookmarked;
@@ -744,15 +1157,26 @@ app.post('/api/posts/:id/bookmark', (req, res) => {
 });
 
 app.delete('/api/posts/:id', (req, res) => {
+  const activeUser = resolveUser(req);
   const index = postsList.findIndex(p => p.id === req.params.id);
   if (index === -1) return res.status(404).json({ error: 'Post not found' });
+  const target = postsList[index];
+  if (
+    target.authorId !== activeUser.id &&
+    target.author?.id !== activeUser.id &&
+    activeUser.role !== 'admin'
+  ) {
+    return res.status(403).json({ error: 'Permission denied: You can only delete your own posts' });
+  }
   postsList.splice(index, 1);
+  delete commentsMap[req.params.id];
   saveDb();
   res.json({ success: true });
 });
 
 // Post Poll Vote
 app.post('/api/posts/:id/poll-vote', (req, res) => {
+  const activeUser = resolveUser(req);
   const post = postsList.find(p => p.id === req.params.id);
   if (!post || !post.poll) return res.status(404).json({ error: 'Poll not found' });
   const { optionId } = req.body;
@@ -762,7 +1186,7 @@ app.post('/api/posts/:id/poll-vote', (req, res) => {
 
   // remove previous vote if any
   post.poll.options.forEach(opt => {
-    const idx = opt.votedUserIds.indexOf(currentUser.id);
+    const idx = opt.votedUserIds.indexOf(activeUser.id);
     if (idx !== -1) {
       opt.votedUserIds.splice(idx, 1);
       opt.votes = Math.max(0, opt.votes - 1);
@@ -770,30 +1194,36 @@ app.post('/api/posts/:id/poll-vote', (req, res) => {
     }
   });
 
-  targetOption.votedUserIds.push(currentUser.id);
+  targetOption.votedUserIds.push(activeUser.id);
   targetOption.votes++;
   post.poll.totalVotes++;
 
+  saveDb();
   res.json({ success: true, poll: post.poll });
 });
 
 // 3. Comments
 app.get('/api/posts/:id/comments', (req, res) => {
-  const comments = commentsMap[req.params.id] || [];
+  const comments = (commentsMap[req.params.id] || []).map(c => ({
+    ...c,
+    author: getEnrichedUser(usersList.find(u => u.id === (c.authorId || c.author?.id)) || c.author)
+  }));
   res.json({ success: true, comments });
 });
 
 app.post('/api/posts/:id/comments', (req, res) => {
-  const { text, replyToId } = req.body;
+  const activeUser = resolveUser(req);
+  const { id, text, replyToId } = req.body;
   if (!text || !text.trim()) return res.status(400).json({ error: 'Text required' });
 
   const post = postsList.find(p => p.id === req.params.id);
   if (!post) return res.status(404).json({ error: 'Post not found' });
 
   const newComment: Comment = {
-    id: `c_${Date.now()}`,
+    id: id || `c_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
     postId: post.id,
-    author: currentUser,
+    authorId: activeUser.id,
+    author: getEnrichedUser(activeUser),
     text: text.trim(),
     createdAt: new Date().toISOString(),
     likesCount: 0,
@@ -817,9 +1247,83 @@ app.post('/api/posts/:id/comments', (req, res) => {
     commentsMap[post.id].push(newComment);
   }
 
-  post.commentsCount++;
+  post.commentsCount = (commentsMap[post.id] || []).reduce(
+    (sum, c) => sum + 1 + (c.replies ? c.replies.length : 0),
+    0
+  );
+
+  if (post.authorId !== activeUser.id) {
+    notificationsList.unshift({
+      id: `notif_comment_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+      recipientId: post.authorId,
+      type: 'comment',
+      actor: getEnrichedUser(activeUser),
+      postId: post.id,
+      text: `commented on your post: "${text.trim().slice(0, 40)}"`,
+      createdAt: new Date().toISOString(),
+      read: false
+    });
+  }
+
   saveDb();
-  res.status(201).json({ success: true, comment: newComment });
+  res.status(201).json({ success: true, comment: newComment, commentsCount: post.commentsCount });
+});
+
+// Delete own comment
+app.delete('/api/posts/:postId/comments/:commentId', (req, res) => {
+  const activeUser = resolveUser(req);
+  const { postId, commentId } = req.params;
+  const post = postsList.find(p => p.id === postId);
+  if (!post) return res.status(404).json({ error: 'Post not found' });
+
+  const list = commentsMap[postId] || [];
+  let foundAndDeleted = false;
+  let forbidden = false;
+
+  const topIdx = list.findIndex(c => c.id === commentId);
+  if (topIdx !== -1) {
+    const target = list[topIdx];
+    const isCommentOwner = target.authorId === activeUser.id || target.author?.id === activeUser.id;
+    const isPostOwner = post.authorId === activeUser.id || post.author?.id === activeUser.id;
+    if (!isCommentOwner && !isPostOwner && activeUser.role !== 'admin') {
+      return res.status(403).json({ error: 'Permission denied: You can only delete your own comments' });
+    }
+    list.splice(topIdx, 1);
+    foundAndDeleted = true;
+  } else {
+    for (const parent of list) {
+      if (parent.replies && parent.replies.length > 0) {
+        const repIdx = parent.replies.findIndex(r => r.id === commentId);
+        if (repIdx !== -1) {
+          const targetReply = parent.replies[repIdx];
+          const isReplyOwner = targetReply.authorId === activeUser.id || targetReply.author?.id === activeUser.id;
+          const isPostOwner = post.authorId === activeUser.id || post.author?.id === activeUser.id;
+          if (!isReplyOwner && !isPostOwner && activeUser.role !== 'admin') {
+            forbidden = true;
+            break;
+          }
+          parent.replies.splice(repIdx, 1);
+          foundAndDeleted = true;
+          break;
+        }
+      }
+    }
+  }
+
+  if (forbidden) {
+    return res.status(403).json({ error: 'Permission denied: You can only delete your own comments' });
+  }
+  if (!foundAndDeleted) {
+    return res.status(404).json({ error: 'Comment not found' });
+  }
+
+  commentsMap[postId] = list;
+  post.commentsCount = list.reduce(
+    (sum, c) => sum + 1 + (c.replies ? c.replies.length : 0),
+    0
+  );
+  saveDb();
+  res.json({ success: true, commentsCount: post.commentsCount });
 });
 
 // 4. Stories & Notes
@@ -1523,11 +2027,21 @@ app.post('/api/events/:id/rsvp', (req, res) => {
 
 // 9. Notifications
 app.get('/api/notifications', (req, res) => {
-  res.json({ success: true, notifications: notificationsList });
+  const activeUser = resolveUser(req);
+  const filtered = notificationsList.filter(
+    n => !n.recipientId || n.recipientId === activeUser.id
+  );
+  res.json({ success: true, notifications: filtered });
 });
 
 app.post('/api/notifications/mark-read', (req, res) => {
-  notificationsList.forEach(n => { n.read = true; });
+  const activeUser = resolveUser(req);
+  notificationsList.forEach(n => {
+    if (!n.recipientId || n.recipientId === activeUser.id) {
+      n.read = true;
+    }
+  });
+  saveDb();
   res.json({ success: true });
 });
 

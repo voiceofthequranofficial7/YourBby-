@@ -29,10 +29,12 @@ service cloud.firestore {
     // ===============================================================
     match /users/{userId} {
       allow read: if true;
-      allow create: if (isOwner(userId) || (request.resource.data.id == userId))
+      allow create: if isAuthenticated()
+                    && (isOwner(userId) || request.resource.data.id == userId)
                     && isValidString(request.resource.data.username, 3, 30)
                     && isValidString(request.resource.data.displayName, 1, 80);
-      allow update: if (isOwner(userId) || (request.resource.data.id == userId) || (resource.data.id == userId))
+      allow update: if isAuthenticated()
+                    && (isOwner(userId) || resource.data.id == userId)
                     && (!('username' in request.resource.data) || isValidString(request.resource.data.username, 3, 30))
                     && (!('displayName' in request.resource.data) || isValidString(request.resource.data.displayName, 1, 80));
       allow delete: if isOwner(userId);
@@ -53,14 +55,23 @@ service cloud.firestore {
     // ===============================================================
     match /posts/{postId} {
       allow read: if true;
-      allow create: if isAuthenticated() && request.resource.data.authorId == request.auth.uid;
-      allow update: if isAuthenticated();
+      allow create: if isAuthenticated()
+                    && (request.resource.data.authorId == request.auth.uid || request.resource.data.id == postId);
+      // Author can edit post content/media; other authenticated users can only update reaction/comment/share counters
+      allow update: if isAuthenticated() && (
+                      resource.data.authorId == request.auth.uid ||
+                      request.resource.data.diff(resource.data).affectedKeys()
+                        .hasOnly(['likesCount', 'reactions', 'likedBy', 'commentsCount', 'sharesCount', 'userReaction'])
+                    );
       allow delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
 
       match /comments/{commentId} {
         allow read: if true;
         allow create: if isAuthenticated();
-        allow update, delete: if isAuthenticated() && resource.data.authorId == request.auth.uid;
+        allow update, delete: if isAuthenticated() && (
+          resource.data.authorId == request.auth.uid ||
+          get(/databases/$(database)/documents/posts/$(postId)).data.authorId == request.auth.uid
+        );
       }
     }
 

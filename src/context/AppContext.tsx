@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
-import { collection, doc, getDoc, getDocs, onSnapshot, query, orderBy, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, deleteDoc, onSnapshot, query, orderBy, setDoc } from 'firebase/firestore';
+import { signOut, updatePassword } from 'firebase/auth';
 import { db, auth, compressImageDataUrl, sanitizeUserForFirestore } from '../firebase/config.ts';
 import { apiFetch } from '../firebase/staticApiFallback.ts';
 import type {
@@ -39,20 +40,26 @@ interface AppContextType {
   setLanguage: (lang: SupportedLanguage) => void;
   t: (key: string) => string;
 
-  // Navigation
+  // Navigation & Global Search
   activeTab: string;
   setActiveTab: (tab: string) => void;
   viewingProfileUsername: string | null;
   setViewingProfileUsername: (username: string | null) => void;
   activeSettingsSection: string;
   setActiveSettingsSection: (section: string) => void;
+  globalSearchQuery: string;
+  setGlobalSearchQuery: (q: string) => void;
 
   // Current User & Accounts
   currentUser: User | null;
+  isAuthenticated: boolean;
   allUsers: User[];
   updateCurrentUserProfile: (data: Partial<User>) => Promise<void>;
   switchUserAccount: (userId: string) => Promise<void>;
-  registerUserAccount: (data: Partial<User>) => Promise<User>;
+  registerUserAccount: (data: Partial<User> & { password?: string }) => Promise<User>;
+  loginUserAccount: (payload: { identifier: string; password: string }) => Promise<User>;
+  logoutUserAccount: () => Promise<void>;
+  changeUserPassword: (currentPassword: string, newPassword: string) => Promise<void>;
   blockedUserIds: string[];
   toggleBlockUser: (userId: string) => void;
 
@@ -61,11 +68,13 @@ interface AppContextType {
   feedType: 'for-you' | 'following' | 'friends' | 'latest';
   setFeedType: (type: 'for-you' | 'following' | 'friends' | 'latest') => void;
   createPost: (postData: any) => Promise<Post>;
+  editPost: (postId: string, updates: Partial<Post>) => Promise<Post>;
   reactToPost: (postId: string, reaction: ReactionType | null) => Promise<void>;
   bookmarkPost: (postId: string) => Promise<void>;
   deletePost: (postId: string) => Promise<void>;
   votePoll: (postId: string, optionId: string) => Promise<void>;
-  addComment: (postId: string, text: string, replyToId?: string) => Promise<void>;
+  addComment: (postId: string, text: string, replyToId?: string) => Promise<Comment | null>;
+  deleteComment: (postId: string, commentId: string) => Promise<void>;
   getCommentsForPost: (postId: string) => Promise<Comment[]>;
 
   // Stories
@@ -313,6 +322,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<string>('feed');
   const [viewingProfileUsername, setViewingProfileUsername] = useState<string | null>(null);
   const [activeSettingsSection, setActiveSettingsSection] = useState<string>('account');
+  const [globalSearchQuery, setGlobalSearchQuery] = useState<string>('');
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    return localStorage.getItem('yourbby_logged_out') !== 'true';
+  });
   const [blockedUserIds, setBlockedUserIds] = useState<string[]>(() => {
     try {
       const raw = localStorage.getItem('yourbby_blocked_users');
@@ -375,6 +388,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Load all initial data
   const loadAllData = useCallback(async () => {
     try {
+      const isLoggedOut = localStorage.getItem('yourbby_logged_out') === 'true';
+      const savedUserId =
+        sessionStorage.getItem('yourbby_active_user_id') ||
+        localStorage.getItem('yourbby_active_user_id');
+
+      if (savedUserId && !isLoggedOut) {
+        sessionStorage.setItem('yourbby_active_user_id', savedUserId);
+      }
+
       const [
         meRes,
         usersRes,
@@ -428,7 +450,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         console.warn('Firestore users load notice:', fsErr);
       }
 
-      if (meRes.success && meRes.user) {
+      if (isLoggedOut) {
+        setIsAuthenticated(false);
+        setCurrentUser(null);
+        setIsAuthModalOpen(true);
+      } else if (meRes.success && meRes.user) {
+        setIsAuthenticated(true);
         const fsMe = firestoreUsersMap.get(meRes.user.id);
         const mergedMe: User = fsMe ? { ...meRes.user, ...fsMe } : meRes.user;
         let resolvedCover =
@@ -458,46 +485,104 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         mergedMe.coverPhoto = resolvedCover;
         setCurrentUser(mergedMe);
         sessionStorage.setItem('yourbby_active_user_id', mergedMe.id);
+        localStorage.setItem('yourbby_active_user_id', mergedMe.id);
 
-        // Ensure backend memory/disk is in sync if Firestore had a newer coverPhotoURL or legacy image was compacted
+        // Ensure backend memory/disk is in sync if Firestore had newer profile data
         if (
           needsCompactSync ||
-          (fsMe && fsMe.coverPhotoURL !== undefined && fsMe.coverPhotoURL !== meRes.user.coverPhoto)
+          (fsMe &&
+            (fsMe.coverPhotoURL !== meRes.user.coverPhoto ||
+              fsMe.displayName !== meRes.user.displayName ||
+              fsMe.bio !== meRes.user.bio ||
+              fsMe.avatar !== meRes.user.avatar))
         ) {
           apiFetch('/api/me', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+              displayName: mergedMe.displayName,
+              username: mergedMe.username,
+              bio: mergedMe.bio,
+              location: mergedMe.location,
+              website: mergedMe.website,
               avatar: mergedMe.avatar,
               coverPhotoURL: resolvedCover,
-              coverPhoto: resolvedCover
+              coverPhoto: resolvedCover,
+              privacy: mergedMe.privacy,
+              settings: mergedMe.settings
             })
           }).catch(() => {});
         }
       }
 
       if (usersRes.success) {
-        const mergedUsers = (usersRes.users || []).map((u: User) => {
+        const mergedUsersMap = new Map<string, User>();
+        (usersRes.users || []).forEach((u: User) => {
           const fsU = firestoreUsersMap.get(u.id);
           const merged = fsU ? { ...u, ...fsU } : u;
           const resolvedCover =
             merged.coverPhotoURL !== undefined ? merged.coverPhotoURL : (merged.coverPhoto ?? '');
-          return {
+          mergedUsersMap.set(u.id, {
             ...merged,
             coverPhotoURL: resolvedCover,
             coverPhoto: resolvedCover
-          };
+          });
         });
-        setAllUsers(mergedUsers);
+        firestoreUsersMap.forEach((fsU, id) => {
+          if (!mergedUsersMap.has(id) && fsU.username && fsU.displayName) {
+            const resolvedCover =
+              fsU.coverPhotoURL !== undefined ? fsU.coverPhotoURL : (fsU.coverPhoto ?? '');
+            mergedUsersMap.set(id, {
+              id,
+              username: fsU.username,
+              displayName: fsU.displayName,
+              avatar: fsU.avatar || '',
+              coverPhotoURL: resolvedCover,
+              coverPhoto: resolvedCover,
+              bio: fsU.bio || '',
+              location: fsU.location || '',
+              website: fsU.website || '',
+              verified: Boolean(fsU.verified),
+              role: fsU.role || 'user',
+              followersCount: fsU.followersCount || 0,
+              followingCount: fsU.followingCount || 0,
+              friendsCount: fsU.friendsCount || 0,
+              isOnline: Boolean(fsU.isOnline),
+              privacy: fsU.privacy || 'public',
+              settings: fsU.settings
+            });
+          }
+        });
+        setAllUsers(Array.from(mergedUsersMap.values()));
       }
-      if (feedRes.success) setPosts(feedRes.posts);
+
+      if (feedRes.success) {
+        let mergedPosts: Post[] = Array.isArray(feedRes.posts) ? [...feedRes.posts] : [];
+        try {
+          const postSnaps = await getDocs(collection(db, 'posts'));
+          if (!postSnaps.empty) {
+            const postMap = new Map<string, Post>();
+            mergedPosts.forEach(p => postMap.set(p.id, p));
+            postSnaps.forEach(d => {
+              const fsPost = d.data() as Post;
+              if (fsPost && fsPost.id && !postMap.has(fsPost.id)) {
+                postMap.set(fsPost.id, fsPost);
+              }
+            });
+            mergedPosts = Array.from(postMap.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+          }
+        } catch (_) {}
+        setPosts(mergedPosts);
+      }
       if (storiesRes.success) setStories(storiesRes.stories);
       if (reelsRes.success) setReels(reelsRes.reels);
       if (notesRes.success) setNotes(notesRes.notes);
       if (convsRes.success) {
         const convList: Conversation[] = convsRes.conversations || [];
         setConversations(convList);
-        if ( convList.length > 0 && convList[0].lastMessage ) {
+        if (convList.length > 0 && convList[0].lastMessage) {
           lastNotifiedMessageIdRef.current = convList[0].lastMessage.id;
         }
       }
@@ -773,8 +858,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Switch between real accounts (e.g. Owner Mohammad Siraj vs Second User Account)
   const switchUserAccount = async (userId: string) => {
+    localStorage.setItem('yourbby_logged_out', 'false');
     sessionStorage.setItem('yourbby_active_user_id', userId);
     localStorage.setItem('yourbby_active_user_id', userId);
+    setIsAuthenticated(true);
     const res = await apiFetch('/api/auth/switch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-user-id': userId },
@@ -790,26 +877,98 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Register a new persistent user account
-  const registerUserAccount = async (userData: Partial<User>): Promise<User> => {
+  const registerUserAccount = async (userData: Partial<User> & { password?: string }): Promise<User> => {
     const res = await apiFetch('/api/users/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(userData)
     });
     const data = await res.json();
-    if (!res.ok || !data.success) {
+    if (!res.ok || !data.success || !data.user) {
       throw new Error(data.error || 'Failed to register user account');
     }
+    localStorage.setItem('yourbby_logged_out', 'false');
     sessionStorage.setItem('yourbby_active_user_id', data.user.id);
     localStorage.setItem('yourbby_active_user_id', data.user.id);
+    setIsAuthenticated(true);
     setCurrentUser(data.user);
     if (Array.isArray(data.users)) {
       setAllUsers(data.users);
     }
+    try {
+      const firestorePayload = await sanitizeUserForFirestore(data.user);
+      await setDoc(doc(db, 'users', data.user.id), firestorePayload, { merge: true });
+    } catch (_) {}
     setActiveConversation(null);
     setActiveConversationMessages([]);
     await loadAllData();
     return data.user;
+  };
+
+  // Login with email/username and password
+  const loginUserAccount = async (payload: { identifier: string; password: string }): Promise<User> => {
+    const res = await apiFetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: payload.identifier,
+        password: payload.password
+      })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success || !data.user) {
+      throw new Error(data.error || 'Invalid login credentials');
+    }
+    localStorage.setItem('yourbby_logged_out', 'false');
+    sessionStorage.setItem('yourbby_active_user_id', data.user.id);
+    localStorage.setItem('yourbby_active_user_id', data.user.id);
+    setIsAuthenticated(true);
+    setCurrentUser(data.user);
+    setActiveConversation(null);
+    setActiveConversationMessages([]);
+    await loadAllData();
+    return data.user;
+  };
+
+  // Real Logout: clear session, sign out of Firebase Auth, and open AuthModal
+  const logoutUserAccount = async () => {
+    try {
+      await apiFetch('/api/auth/logout', { method: 'POST' });
+    } catch (_) {}
+    try {
+      await signOut(auth);
+    } catch (_) {}
+    localStorage.setItem('yourbby_logged_out', 'true');
+    sessionStorage.removeItem('yourbby_active_user_id');
+    localStorage.removeItem('yourbby_active_user_id');
+    setIsAuthenticated(false);
+    setCurrentUser(null);
+    setActiveConversation(null);
+    setActiveConversationMessages([]);
+    setIsAuthModalOpen(true);
+  };
+
+  // Change password for active user
+  const changeUserPassword = async (currentPassword: string, newPassword: string) => {
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('New password must be at least 6 characters long');
+    }
+    if (auth.currentUser) {
+      try {
+        await updatePassword(auth.currentUser, newPassword);
+      } catch (fbErr: any) {
+        console.warn('Firebase Auth updatePassword notice:', fbErr?.message);
+      }
+    }
+    const res = await apiFetch('/api/auth/change-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ currentPassword, newPassword })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Failed to update password');
+    }
   };
 
   // Posts operations
@@ -822,42 +981,103 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const json = await res.json();
     if (json.success && json.post) {
       setPosts(prev => [json.post, ...prev]);
+      setDoc(doc(db, 'posts', json.post.id), json.post, { merge: true }).catch(() => {});
       return json.post;
     }
     throw new Error(json.error || 'Failed to create post');
   };
 
+  const editPost = async (postId: string, updates: Partial<Post>): Promise<Post> => {
+    const res = await apiFetch(`/api/posts/${postId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates)
+    });
+    const json = await res.json();
+    if (!res.ok || !json.success || !json.post) {
+      throw new Error(json.error || 'Failed to edit post');
+    }
+    setPosts(prev => prev.map(p => (p.id === postId ? json.post : p)));
+    setDoc(doc(db, 'posts', postId), json.post, { merge: true }).catch(() => {});
+    return json.post;
+  };
+
   const reactToPost = async (postId: string, reaction: ReactionType | null) => {
-    setPosts(prev => prev.map(p => {
-      if (p.id !== postId) return p;
-      const prevReaction = p.userReaction;
-      const newCounts = { ...p.reactionCounts };
-      let newLikes = p.likesCount;
+    const actorId = currentUser?.id || 'owner';
+    setPosts(prev =>
+      prev.map(p => {
+        if (p.id !== postId) return p;
+        const likedBy: Record<string, ReactionType> = { ...(p.likedBy || {}) };
+        if (p.userReaction && !likedBy[actorId]) {
+          likedBy[actorId] = p.userReaction;
+        }
+        const prevReaction = likedBy[actorId] || null;
+        const nextReaction = reaction === null || reaction === prevReaction ? null : reaction;
 
-      if (prevReaction && newCounts[prevReaction] > 0) {
-        newCounts[prevReaction]--;
-        newLikes = Math.max(0, newLikes - 1);
-      }
+        if (nextReaction) {
+          likedBy[actorId] = nextReaction;
+        } else {
+          delete likedBy[actorId];
+        }
 
-      if (reaction && reaction !== prevReaction) {
-        newCounts[reaction] = (newCounts[reaction] || 0) + 1;
-        newLikes++;
-      }
+        const newCounts: Record<ReactionType, number> = {
+          like: 0,
+          love: 0,
+          care: 0,
+          haha: 0,
+          wow: 0,
+          sad: 0,
+          angry: 0
+        };
+        let newLikes = 0;
+        Object.values(likedBy).forEach(r => {
+          if (r && newCounts[r] !== undefined) {
+            newCounts[r]++;
+            newLikes++;
+          }
+        });
 
-      return {
-        ...p,
-        userReaction: reaction === prevReaction ? null : reaction,
-        reactionCounts: newCounts,
-        likesCount: newLikes
-      };
-    }));
+        return {
+          ...p,
+          userReaction: nextReaction,
+          likedBy,
+          reactionCounts: newCounts,
+          likesCount: newLikes
+        };
+      })
+    );
 
     try {
-      await apiFetch(`/api/posts/${postId}/react`, {
+      const res = await apiFetch(`/api/posts/${postId}/react`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reaction }),
       });
+      const data = await res.json();
+      if (data.success) {
+        setPosts(prev =>
+          prev.map(p =>
+            p.id === postId
+              ? {
+                  ...p,
+                  userReaction: data.userReaction,
+                  likesCount: data.likesCount,
+                  reactionCounts: data.reactionCounts,
+                  likedBy: data.likedBy || p.likedBy
+                }
+              : p
+          )
+        );
+        setDoc(
+          doc(db, 'posts', postId),
+          {
+            likesCount: data.likesCount,
+            reactionCounts: data.reactionCounts,
+            likedBy: data.likedBy || {}
+          },
+          { merge: true }
+        ).catch(() => {});
+      }
     } catch (err) {
       console.error(err);
     }
@@ -873,12 +1093,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const deletePost = async (postId: string) => {
-    setPosts(prev => prev.filter(p => p.id !== postId));
-    try {
-      await apiFetch(`/api/posts/${postId}`, { method: 'DELETE' });
-    } catch (err) {
-      console.error(err);
+    const res = await apiFetch(`/api/posts/${postId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || 'Failed to delete post');
     }
+    setPosts(prev => prev.filter(p => p.id !== postId));
+    deleteDoc(doc(db, 'posts', postId)).catch(() => {});
   };
 
   const votePoll = async (postId: string, optionId: string) => {
@@ -898,7 +1119,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  const addComment = async (postId: string, text: string, replyToId?: string) => {
+  const addComment = async (postId: string, text: string, replyToId?: string): Promise<Comment | null> => {
     try {
       const res = await apiFetch(`/api/posts/${postId}/comments`, {
         method: 'POST',
@@ -906,19 +1127,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({ text, replyToId }),
       });
       const data = await res.json();
-      if (data.success) {
-        setPosts(prev => prev.map(p => p.id === postId ? { ...p, commentsCount: p.commentsCount + 1 } : p));
+      if (data.success && data.comment) {
+        const nextCount = typeof data.commentsCount === 'number' ? data.commentsCount : undefined;
+        setPosts(prev =>
+          prev.map(p =>
+            p.id === postId
+              ? { ...p, commentsCount: nextCount !== undefined ? nextCount : p.commentsCount + 1 }
+              : p
+          )
+        );
+        setDoc(doc(db, 'posts', postId, 'comments', data.comment.id), data.comment, { merge: true }).catch(() => {});
+        return data.comment;
       }
+      return null;
     } catch (err) {
       console.error(err);
+      return null;
     }
+  };
+
+  const deleteComment = async (postId: string, commentId: string) => {
+    const res = await apiFetch(`/api/posts/${postId}/comments/${commentId}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) {
+      throw new Error(data.error || 'Failed to delete comment');
+    }
+    setPosts(prev =>
+      prev.map(p =>
+        p.id === postId
+          ? {
+              ...p,
+              commentsCount:
+                typeof data.commentsCount === 'number'
+                  ? data.commentsCount
+                  : Math.max(0, p.commentsCount - 1)
+            }
+          : p
+      )
+    );
+    deleteDoc(doc(db, 'posts', postId, 'comments', commentId)).catch(() => {});
   };
 
   const getCommentsForPost = async (postId: string): Promise<Comment[]> => {
     try {
       const res = await apiFetch(`/api/posts/${postId}/comments`);
       const data = await res.json();
-      return data.success ? data.comments : [];
+      const apiComments: Comment[] = data.success && Array.isArray(data.comments) ? data.comments : [];
+      try {
+        const snaps = await getDocs(collection(db, 'posts', postId, 'comments'));
+        if (!snaps.empty) {
+          const map = new Map<string, Comment>();
+          apiComments.forEach(c => map.set(c.id, c));
+          snaps.forEach(d => {
+            const c = d.data() as Comment;
+            if (c && c.id && !map.has(c.id)) {
+              map.set(c.id, c);
+            }
+          });
+          return Array.from(map.values()).sort(
+            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          );
+        }
+      } catch (_) {}
+      return apiComments;
     } catch (err) {
       console.error(err);
       return [];
@@ -1447,22 +1720,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setViewingProfileUsername,
         activeSettingsSection,
         setActiveSettingsSection,
+        globalSearchQuery,
+        setGlobalSearchQuery,
         currentUser,
+        isAuthenticated,
         allUsers,
         updateCurrentUserProfile,
         switchUserAccount,
         registerUserAccount,
+        loginUserAccount,
+        logoutUserAccount,
+        changeUserPassword,
         blockedUserIds,
         toggleBlockUser,
         posts,
         feedType,
         setFeedType,
         createPost,
+        editPost,
         reactToPost,
         bookmarkPost,
         deletePost,
         votePoll,
         addComment,
+        deleteComment,
         getCommentsForPost,
         stories,
         createStory,

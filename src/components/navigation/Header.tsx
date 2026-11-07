@@ -31,6 +31,7 @@ export const Header: React.FC = () => {
     activeTab,
     setActiveTab,
     currentUser,
+    allUsers,
     openCreateModal,
     unreadNotifsCount,
     notifications,
@@ -39,22 +40,40 @@ export const Header: React.FC = () => {
     liveStream,
     setViewingProfileUsername,
     conversations,
-    setIsAuthModalOpen
+    setIsAuthModalOpen,
+    logoutUserAccount,
+    globalSearchQuery,
+    setGlobalSearchQuery
   } = useApp();
 
   const [isNotifOpen, setIsNotifOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isLangMenuOpen, setIsLangMenuOpen] = useState(false);
   const [isMenuDrawerOpen, setIsMenuDrawerOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
 
   const totalUnreadMessages = conversations.reduce((acc, c) => acc + (c.unreadCount || 0), 0);
 
+  const matchingUsers = globalSearchQuery.trim()
+    ? allUsers.filter((u) => {
+        const q = globalSearchQuery.trim().toLowerCase().replace(/^@/, '');
+        return (
+          u.username.toLowerCase().includes(q) ||
+          u.displayName.toLowerCase().includes(q)
+        );
+      })
+    : [];
+
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (searchQuery.trim()) {
-      setActiveTab('explore');
-    }
+    setIsSearchFocused(false);
+    setActiveTab('explore');
+  };
+
+  const handleSelectDiscoveredUser = (username: string) => {
+    setViewingProfileUsername(username);
+    setActiveTab('profile');
+    setIsSearchFocused(false);
   };
 
   const handleProfileClick = () => {
@@ -106,18 +125,67 @@ export const Header: React.FC = () => {
             </button>
           </div>
 
-        {/* Zone 2: Search Affordance */}
-        <div className="hidden sm:flex flex-1 max-w-md mx-2">
+        {/* Zone 2: Search Affordance with Real User Discovery */}
+        <div className="hidden sm:flex flex-1 max-w-md mx-2 relative">
           <form onSubmit={handleSearchSubmit} className="relative w-full">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input
               type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              value={globalSearchQuery}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setTimeout(() => setIsSearchFocused(false), 180)}
+              onChange={(e) => {
+                setGlobalSearchQuery(e.target.value);
+                setIsSearchFocused(true);
+              }}
               placeholder={t('searchPlaceholder')}
-              className="w-full pl-10 pr-4 py-2 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200/70 dark:hover:bg-slate-800 focus:bg-white dark:focus:bg-slate-900 border border-transparent focus:border-rose-500/30 rounded-full text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none transition-all"
+              className="w-full pl-10 pr-8 py-2 bg-slate-100 dark:bg-slate-800/80 hover:bg-slate-200/70 dark:hover:bg-slate-800 focus:bg-white dark:focus:bg-slate-900 border border-transparent focus:border-rose-500/30 rounded-full text-xs sm:text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none transition-all"
             />
+            {globalSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setGlobalSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </form>
+
+          {isSearchFocused && globalSearchQuery.trim() && (
+            <div className="absolute left-0 right-0 top-full mt-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xl py-2 z-50 max-h-80 overflow-y-auto">
+              <div className="px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                Registered Users ({matchingUsers.length})
+              </div>
+              {matchingUsers.length === 0 ? (
+                <p className="px-4 py-3 text-xs text-slate-500">
+                  No registered users found matching "{globalSearchQuery}"
+                </p>
+              ) : (
+                matchingUsers.map((u) => (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onMouseDown={() => handleSelectDiscoveredUser(u.username)}
+                    className="w-full px-3.5 py-2.5 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/70 text-left transition-colors"
+                  >
+                    <img
+                      src={u.avatar}
+                      alt={u.displayName}
+                      className="w-9 h-9 rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-700"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-bold text-slate-900 dark:text-white truncate flex items-center gap-1">
+                        <span>{u.displayName}</span>
+                        {u.verified && <CheckCircle2 className="w-3.5 h-3.5 text-rose-500 shrink-0" />}
+                      </p>
+                      <p className="text-[11px] text-slate-400 truncate">@{u.username}</p>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
         {/* Zone 3: Actions & Controls */}
@@ -335,10 +403,20 @@ export const Header: React.FC = () => {
                   </button>
                   <button
                     onClick={() => { setIsAuthModalOpen(true); setIsUserMenuOpen(false); }}
-                    className="w-full px-4 py-2 text-left text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2.5 border-t border-slate-100 dark:border-slate-800"
+                    className="w-full px-4 py-2 text-left text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2.5 border-t border-slate-100 dark:border-slate-800"
+                  >
+                    <Sparkles className="w-4 h-4 text-indigo-500" />
+                    <span>Switch Account / Sign In</span>
+                  </button>
+                  <button
+                    onClick={async () => {
+                      setIsUserMenuOpen(false);
+                      await logoutUserAccount();
+                    }}
+                    className="w-full px-4 py-2 text-left text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 flex items-center gap-2.5"
                   >
                     <LogOut className="w-4 h-4 text-rose-500" />
-                    <span>Switch Account / Sign In</span>
+                    <span>Log Out</span>
                   </button>
                 </div>
               </div>

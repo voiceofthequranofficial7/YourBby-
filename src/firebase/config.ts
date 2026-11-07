@@ -109,9 +109,21 @@ export async function compressImageDataUrl(
   });
 }
 
+function dataUrlToBlob(dataUrl: string): Blob {
+  const parts = dataUrl.split(',');
+  const mimeMatch = parts[0]?.match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  const binary = atob(parts[1] || '');
+  const array = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    array[i] = binary.charCodeAt(i);
+  }
+  return new Blob([array], { type: mime });
+}
+
 /**
  * Prepares a canonical User object for Firestore persistence:
- * 1. Never stores raw Base64 image data in `coverPhotoURL` (only real URLs or compact SVG default)
+ * 1. Never stores raw Base64 image data in `coverPhotoURL` or `avatar` (only real URLs or compact SVG default)
  * 2. Stores the cover photo in the single dedicated `coverPhotoURL` field and deletes
  *    the obsolete duplicate `coverPhoto` field in Firestore
  * 3. Guarantees the serialized document size is strictly under Firestore's 1,048,576 byte limit.
@@ -121,21 +133,30 @@ export async function sanitizeUserForFirestore(user: User): Promise<Record<strin
     user.coverPhotoURL !== undefined ? user.coverPhotoURL : (user.coverPhoto || '');
   const rawAvatar = user.avatar || '';
 
-  const compactAvatar =
-    rawAvatar.startsWith('data:image/') && rawAvatar.length > 120000
-      ? await compressImageDataUrl(rawAvatar, 320, 320, 110000)
-      : rawAvatar;
+  let cleanAvatarUrl = rawAvatar;
+  if (rawAvatar.startsWith('data:image/') && !rawAvatar.startsWith('data:image/svg+xml')) {
+    try {
+      const blob = dataUrlToBlob(rawAvatar);
+      cleanAvatarUrl = await uploadProfilePhotoFile(blob, user.id || 'owner', 'avatar.jpg');
+    } catch {
+      cleanAvatarUrl = '';
+    }
+  }
 
-  // Never allow Base64 raster Data URLs in Firestore coverPhotoURL; only URLs or compact default SVG
-  const cleanCoverUrl =
-    rawCover.startsWith('data:image/') && !rawCover.startsWith('data:image/svg+xml')
-      ? ''
-      : rawCover;
+  let cleanCoverUrl = rawCover;
+  if (rawCover.startsWith('data:image/') && !rawCover.startsWith('data:image/svg+xml')) {
+    try {
+      const blob = dataUrlToBlob(rawCover);
+      cleanCoverUrl = await uploadCoverPhotoFile(blob, user.id || 'owner', 'cover.jpg');
+    } catch {
+      cleanCoverUrl = '';
+    }
+  }
 
   const firestorePayload: Record<string, any> = {
     ...user,
     id: user.id,
-    avatar: compactAvatar,
+    avatar: cleanAvatarUrl,
     coverPhotoURL: cleanCoverUrl,
     // Remove obsolete duplicate coverPhoto property from the Firestore document
     coverPhoto: deleteField(),
@@ -143,6 +164,109 @@ export async function sanitizeUserForFirestore(user: User): Promise<Record<strin
   };
 
   return firestorePayload;
+}
+
+/**
+ * Dedicated Profile Photo binary uploader:
+ * 1. Attempts upload of binary Blob/File to Firebase Storage (`users/{userId}/avatars/{fileName}`) + getDownloadURL.
+ * 2. If Firebase Storage bucket is unprovisioned, uploads the binary Blob to `/api/media/avatar`
+ *    and returns the real HTTP download URL (`/api/media/avatars/...`).
+ * 3. Never returns a Base64 Data URL; throws the real error if upload fails.
+ */
+export async function uploadProfilePhotoFile(
+  blob: Blob | File,
+  userId: string,
+  fileName: string,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  console.log('[AvatarUploadFlow] Starting binary profile photo upload', {
+    userId,
+    fileName,
+    sizeBytes: blob.size,
+    type: blob.type
+  });
+  onProgress?.(10);
+
+  const safeName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  const storagePath = `users/${userId}/avatars/${safeName}`;
+
+  let firebaseStorageError: any = null;
+
+  if (firebaseConfig.storageBucket) {
+    try {
+      const fileRef = storageRef(storage, storagePath);
+      const downloadUrl = await new Promise<string>((resolve, reject) => {
+        const task = uploadBytesResumable(fileRef, blob, {
+          contentType: blob.type || 'image/jpeg'
+        });
+
+        const timer = setTimeout(() => {
+          task.cancel();
+          reject(new Error('Firebase Storage avatar upload timed out after 5s'));
+        }, 5000);
+
+        task.on(
+          'state_changed',
+          (snapshot) => {
+            if (snapshot.totalBytes > 0) {
+              const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 75) + 15;
+              onProgress?.(Math.min(90, pct));
+            }
+          },
+          (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+          async () => {
+            clearTimeout(timer);
+            try {
+              const url = await getDownloadURL(task.snapshot.ref);
+              resolve(url);
+            } catch (e) {
+              reject(e);
+            }
+          }
+        );
+      });
+
+      console.log('[AvatarUploadFlow] Firebase Storage upload succeeded ->', downloadUrl);
+      onProgress?.(100);
+      return downloadUrl;
+    } catch (err: any) {
+      firebaseStorageError = err;
+      console.warn(
+        '[AvatarUploadFlow] Firebase Storage bucket notice:',
+        err?.status_ || err?.code || err?.message
+      );
+    }
+  }
+
+  onProgress?.(55);
+  const res = await fetch('/api/media/avatar', {
+    method: 'POST',
+    headers: {
+      'Content-Type': blob.type || 'image/jpeg',
+      'x-user-id': userId
+    },
+    body: blob
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    const fbMsg = firebaseStorageError
+      ? `Firebase Storage error (${firebaseStorageError.code || 'storage/error'}): ${firebaseStorageError.message}`
+      : `Avatar upload failed with HTTP ${res.status}: ${errText}`;
+    throw new Error(fbMsg);
+  }
+
+  const data = await res.json();
+  if (!data.success || !data.downloadURL) {
+    throw new Error(data.error || 'Server did not return a valid profile photo download URL');
+  }
+
+  console.log('[AvatarUploadFlow] Binary profile photo uploaded -> downloadURL:', data.downloadURL);
+  onProgress?.(100);
+  return data.downloadURL;
 }
 
 /**
@@ -245,6 +369,114 @@ export async function uploadCoverPhotoFile(
   }
 
   console.log('[CoverPhotoFlow] Step 5: Binary cover uploaded -> downloadURL:', data.downloadURL);
+  onProgress?.(100);
+  return data.downloadURL;
+}
+
+/**
+ * Dedicated Post Photo & Video binary uploader:
+ * 1. Attempts upload of binary File/Blob to Firebase Storage (`posts/{userId}/{images|videos}/{fileName}`) + getDownloadURL.
+ * 2. If Firebase Storage bucket is unprovisioned, uploads the binary File/Blob to `/api/media/post`
+ *    and returns the real HTTP download URL (`/api/media/posts/...`).
+ * 3. Never returns a Base64 Data URL; throws the real error if upload fails.
+ */
+export async function uploadPostMediaFile(
+  fileOrBlob: Blob | File,
+  userId: string,
+  fileName: string,
+  onProgress?: (percent: number) => void
+): Promise<string> {
+  const isVideo = (fileOrBlob.type || '').startsWith('video/');
+  const subFolder = isVideo ? 'videos' : 'images';
+  console.log('[PostMediaFlow] Starting binary post media upload', {
+    userId,
+    fileName,
+    sizeBytes: fileOrBlob.size,
+    type: fileOrBlob.type
+  });
+  onProgress?.(10);
+
+  const safeName = `${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  const storagePath = `posts/${userId}/${subFolder}/${safeName}`;
+
+  let firebaseStorageError: any = null;
+
+  if (firebaseConfig.storageBucket) {
+    try {
+      const fileRef = storageRef(storage, storagePath);
+      const downloadUrl = await new Promise<string>((resolve, reject) => {
+        const task = uploadBytesResumable(fileRef, fileOrBlob, {
+          contentType: fileOrBlob.type || (isVideo ? 'video/mp4' : 'image/jpeg')
+        });
+
+        const timer = setTimeout(() => {
+          task.cancel();
+          reject(new Error('Firebase Storage post media upload timed out after 6s'));
+        }, 6000);
+
+        task.on(
+          'state_changed',
+          (snapshot) => {
+            if (snapshot.totalBytes > 0) {
+              const pct = Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 75) + 15;
+              onProgress?.(Math.min(90, pct));
+            }
+          },
+          (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+          async () => {
+            clearTimeout(timer);
+            try {
+              const url = await getDownloadURL(task.snapshot.ref);
+              resolve(url);
+            } catch (e) {
+              reject(e);
+            }
+          }
+        );
+      });
+
+      console.log('[PostMediaFlow] Firebase Storage upload succeeded ->', downloadUrl);
+      onProgress?.(100);
+      return downloadUrl;
+    } catch (err: any) {
+      firebaseStorageError = err;
+      console.warn(
+        '[PostMediaFlow] Firebase Storage bucket notice:',
+        err?.status_ || err?.code || err?.message
+      );
+    }
+  }
+
+  onProgress?.(55);
+  const res = await fetch(
+    `/api/media/post?fileName=${encodeURIComponent(safeName)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': fileOrBlob.type || (isVideo ? 'video/mp4' : 'image/jpeg'),
+        'x-user-id': userId
+      },
+      body: fileOrBlob
+    }
+  );
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    const fbMsg = firebaseStorageError
+      ? `Firebase Storage error (${firebaseStorageError.code || 'storage/error'}): ${firebaseStorageError.message}`
+      : `Post media upload failed with HTTP ${res.status}: ${errText}`;
+    throw new Error(fbMsg);
+  }
+
+  const data = await res.json();
+  if (!data.success || !data.downloadURL) {
+    throw new Error(data.error || 'Server did not return a valid post media download URL');
+  }
+
+  console.log('[PostMediaFlow] Binary post media uploaded -> downloadURL:', data.downloadURL);
   onProgress?.(100);
   return data.downloadURL;
 }

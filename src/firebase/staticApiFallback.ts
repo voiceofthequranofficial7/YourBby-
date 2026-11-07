@@ -274,9 +274,66 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
     } catch (_) {}
   }
 
-  // 1. /api/me & /api/profile/update
+  // 1. /api/me & /api/profile/update & /api/users/register & /api/auth/*
   if (path === '/api/me' && method === 'GET') {
     return jsonResponse({ success: true, user: store.currentUser });
+  }
+
+  if (path === '/api/users/register' && method === 'POST') {
+    const cleanUsername = String(body.username || '').trim().toLowerCase().replace(/^@/, '');
+    if (!cleanUsername || cleanUsername.length < 3) {
+      return jsonResponse({ error: 'Valid username (3-30 characters) is required' }, 400);
+    }
+    const existing = store.usersList.find(u => u.username.toLowerCase() === cleanUsername && u.id !== body.id);
+    if (existing) {
+      return jsonResponse({ error: 'Username is already taken' }, 409);
+    }
+    const targetId = body.id || auth.currentUser?.uid || `u_${Date.now()}`;
+    const newUser: User = {
+      id: targetId,
+      username: cleanUsername,
+      displayName: String(body.displayName || cleanUsername).trim(),
+      email: body.email ? String(body.email).trim().toLowerCase() : undefined,
+      avatar: body.avatar || DEFAULT_OWNER_AVATAR,
+      coverPhotoURL: body.coverPhotoURL || body.coverPhoto || '',
+      coverPhoto: body.coverPhotoURL || body.coverPhoto || '',
+      bio: body.bio || '',
+      location: body.location || '',
+      website: body.website || '',
+      verified: false,
+      role: 'user',
+      followersCount: 0,
+      followingCount: 0,
+      friendsCount: 0,
+      isOnline: true,
+      privacy: body.privacy || 'public',
+    };
+    store.currentUser = newUser;
+    store.usersList = [newUser, ...store.usersList.filter(u => u.id !== newUser.id)];
+    saveStore(store);
+    await syncUserToFirestore(newUser);
+    return jsonResponse({ success: true, user: newUser, users: store.usersList }, 201);
+  }
+
+  if (path === '/api/auth/login' && method === 'POST') {
+    const rawIdent = String(body.identifier || body.email || body.username || '').trim().toLowerCase().replace(/^@/, '');
+    const found = store.usersList.find(
+      u => u.username.toLowerCase() === rawIdent || (u.email && u.email.toLowerCase() === rawIdent)
+    );
+    if (!found) {
+      return jsonResponse({ error: 'Account not found. Please check your username or email.' }, 401);
+    }
+    store.currentUser = { ...found, isOnline: true };
+    saveStore(store);
+    return jsonResponse({ success: true, user: store.currentUser, users: store.usersList });
+  }
+
+  if (path === '/api/auth/logout' && method === 'POST') {
+    return jsonResponse({ success: true });
+  }
+
+  if (path === '/api/auth/change-password' && method === 'POST') {
+    return jsonResponse({ success: true, message: 'Password updated successfully' });
   }
 
   if ((path === '/api/me' && method === 'PUT') || (path === '/api/profile/update' && method === 'POST')) {
@@ -290,7 +347,11 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
       }
       body.username = clean;
     }
-    const nextUser: User = { ...store.currentUser, ...body };
+    const nextUser: User = {
+      ...store.currentUser,
+      ...body,
+      settings: body.settings ? { ...(store.currentUser.settings || {}), ...body.settings } : store.currentUser.settings
+    };
     if (body.coverPhotoURL !== undefined || body.coverPhoto !== undefined) {
       const resolvedCover = body.coverPhotoURL !== undefined ? body.coverPhotoURL : body.coverPhoto;
       nextUser.coverPhotoURL = resolvedCover || '';
@@ -370,7 +431,7 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
 
   if (path === '/api/posts' && method === 'POST') {
     const newPost: Post = {
-      id: `post_${Date.now()}`,
+      id: body.id || `post_${Date.now()}`,
       authorId: auth.currentUser?.uid || store.currentUser.id,
       author: store.currentUser,
       content: body.content || '',
@@ -383,6 +444,7 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
       createdAt: new Date().toISOString(),
       likesCount: 0,
       userReaction: null,
+      likedBy: {},
       reactionCounts: { like: 0, love: 0, care: 0, haha: 0, wow: 0, sad: 0, angry: 0 },
       commentsCount: 0,
       repostsCount: 0,
@@ -395,15 +457,58 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
     return jsonResponse({ success: true, post: newPost });
   }
 
-  const postDeleteMatch = path.match(/^\/api\/posts\/([^/]+)$/);
-  if (postDeleteMatch && method === 'DELETE') {
-    const postId = postDeleteMatch[1];
+  const postItemMatch = path.match(/^\/api\/posts\/([^/]+)$/);
+  if (postItemMatch && method === 'PUT') {
+    const postId = postItemMatch[1];
+    let editedPost: Post | undefined;
+    store.postsList = store.postsList.map(p => {
+      if (p.id !== postId) return p;
+      editedPost = {
+        ...p,
+        content: body.content !== undefined ? String(body.content) : p.content,
+        locationName: body.locationName !== undefined ? body.locationName : p.locationName,
+        feeling: body.feeling !== undefined ? body.feeling : p.feeling,
+        audience: body.audience !== undefined ? body.audience : p.audience,
+        mediaUrls: Array.isArray(body.mediaUrls) ? body.mediaUrls : p.mediaUrls,
+        mediaType: body.mediaType !== undefined ? body.mediaType : p.mediaType,
+        isEdited: true,
+        editedAt: new Date().toISOString(),
+      };
+      return editedPost;
+    });
+    saveStore(store);
+    if (editedPost) await syncPostToFirestore(editedPost);
+    return jsonResponse({ success: true, post: editedPost });
+  }
+
+  if (postItemMatch && method === 'DELETE') {
+    const postId = postItemMatch[1];
     store.postsList = store.postsList.filter(p => p.id !== postId);
+    delete store.commentsMap[postId];
     saveStore(store);
     if (auth.currentUser) {
       deleteDoc(doc(db, 'posts', postId)).catch(() => {});
     }
     return jsonResponse({ success: true });
+  }
+
+  const commentDeleteMatch = path.match(/^\/api\/posts\/([^/]+)\/comments\/([^/]+)$/);
+  if (commentDeleteMatch && method === 'DELETE') {
+    const [, postId, commentId] = commentDeleteMatch;
+    const list = (store.commentsMap[postId] || []).filter(c => c.id !== commentId);
+    store.commentsMap[postId] = list.map(c => ({
+      ...c,
+      replies: (c.replies || []).filter(r => r.id !== commentId)
+    }));
+    const newCount = store.commentsMap[postId].reduce(
+      (sum, c) => sum + 1 + (c.replies ? c.replies.length : 0),
+      0
+    );
+    store.postsList = store.postsList.map(p =>
+      p.id === postId ? { ...p, commentsCount: newCount } : p
+    );
+    saveStore(store);
+    return jsonResponse({ success: true, commentsCount: newCount });
   }
 
   const postSubMatch = path.match(/^\/api\/posts\/([^/]+)\/(react|bookmark|poll-vote|comments)$/);
@@ -417,8 +522,9 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
 
     if (sub === 'comments' && method === 'POST') {
       const comment: Comment = {
-        id: `c_${Date.now()}`,
+        id: body.id || `c_${Date.now()}`,
         postId,
+        authorId: store.currentUser.id,
         author: store.currentUser,
         text: body.text || '',
         createdAt: new Date().toISOString(),
@@ -442,8 +548,36 @@ async function handleClientApiFallback(urlStr: string, init?: RequestInit): Prom
     }
 
     if (sub === 'react' && method === 'POST') {
+      let respPayload: any = { success: true };
+      store.postsList = store.postsList.map(p => {
+        if (p.id !== postId) return p;
+        const likedBy = { ...(p.likedBy || {}) };
+        const prev = likedBy[store.currentUser.id] || null;
+        const nextReaction = body.reaction === prev || body.reaction === null ? null : body.reaction;
+        if (nextReaction) {
+          likedBy[store.currentUser.id] = nextReaction;
+        } else {
+          delete likedBy[store.currentUser.id];
+        }
+        const reactionCounts: any = { like: 0, love: 0, care: 0, haha: 0, wow: 0, sad: 0, angry: 0 };
+        let likesCount = 0;
+        Object.values(likedBy).forEach(r => {
+          if (r && reactionCounts[r] !== undefined) {
+            reactionCounts[r]++;
+            likesCount++;
+          }
+        });
+        respPayload = {
+          success: true,
+          userReaction: nextReaction,
+          likesCount,
+          reactionCounts,
+          likedBy
+        };
+        return { ...p, userReaction: nextReaction, likesCount, reactionCounts, likedBy };
+      });
       saveStore(store);
-      return jsonResponse({ success: true });
+      return jsonResponse(respPayload);
     }
 
     if (sub === 'poll-vote' && method === 'POST') {

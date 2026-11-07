@@ -4,10 +4,43 @@
 
 export type ReactionType = 'like' | 'love' | 'care' | 'haha' | 'wow' | 'sad' | 'angry';
 
+export interface UserSettings {
+  twoFactorEnabled?: boolean;
+  twoFactorAuth?: boolean;
+  loginAlertsEnabled?: boolean;
+  loginAlerts?: boolean;
+  showOnlineStatus?: boolean;
+  allowTagging?: boolean;
+  searchEngineIndexing?: boolean;
+  pushNotifications?: boolean;
+  pushNotifs?: boolean;
+  messageAlerts?: boolean;
+  storyReactionAlerts?: boolean;
+  emailDigest?: boolean;
+  likesCommentsNotifs?: boolean;
+  newFollowerNotifs?: boolean;
+  directMessageNotifs?: boolean;
+  storyViewsNotifs?: boolean;
+  callRingtoneNotifs?: boolean;
+  readReceipts?: boolean;
+  typingIndicators?: boolean;
+  whoCanMessage?: 'everyone' | 'followers' | 'friends';
+  whoCanCall?: 'everyone' | 'followers' | 'friends';
+  callPermissionWho?: 'everyone' | 'following' | 'nobody';
+  defaultPostAudience?: 'public' | 'followers' | 'friends';
+  defaultStoryPrivacy?: 'public' | 'friends' | 'close_friends';
+  allowStorySharing?: boolean;
+  saveStoriesToArchive?: boolean;
+  textScale?: 'default' | 'large';
+  reduceMotion?: boolean;
+  autoPlayVideos?: boolean;
+}
+
 export interface User {
   id: string;
   username: string;
   displayName: string;
+  email?: string;
   avatar: string;
   coverPhoto?: string;
   coverPhotoURL?: string;
@@ -26,6 +59,7 @@ export interface User {
   isCloseFriend?: boolean;
   badge?: string;
   privacy?: 'public' | 'followers_only' | 'private';
+  settings?: UserSettings;
   lastSeen?: string;
 }
 
@@ -45,6 +79,7 @@ export interface Poll {
 export interface Comment {
   id: string;
   postId: string;
+  authorId?: string;
   author: User;
   text: string;
   createdAt: string;
@@ -68,8 +103,11 @@ export interface Post {
   locationName?: string;
   audience: 'public' | 'friends' | 'close_friends' | 'only_me';
   createdAt: string;
+  isEdited?: boolean;
+  editedAt?: string;
   likesCount: number;
   userReaction?: ReactionType | null;
+  likedBy?: Record<string, ReactionType>;
   reactionCounts: Record<ReactionType, number>;
   commentsCount: number;
   repostsCount: number;
@@ -254,6 +292,7 @@ export interface SocialEvent {
 
 export interface NotificationItem {
   id: string;
+  recipientId?: string;
   type: 'like' | 'love' | 'care' | 'haha' | 'wow' | 'sad' | 'angry' | 'comment' | 'follow' | 'friend_request' | 'mention' | 'repost' | 'live' | 'admin' | 'message' | 'call';
   actor: User;
   postId?: string;

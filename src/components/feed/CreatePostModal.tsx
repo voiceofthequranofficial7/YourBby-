@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useApp } from '../../context/AppContext.tsx';
+import { uploadPostMediaFile } from '../../firebase/config.ts';
 import { CameraCaptureModal } from '../camera/CameraCaptureModal.tsx';
 import { MediaEditorModal } from '../media/MediaEditorModal.tsx';
 import {
@@ -98,53 +99,98 @@ export const CreatePostModal: React.FC = () => {
 
   if (!isCreateModalOpen) return null;
 
-  // Handle local Gallery / File Picker
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    setFileError(null);
+  const [isUploadingMedia, setIsUploadingMedia] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [failedFiles, setFailedFiles] = useState<File[]>([]);
 
-    Array.from(files).forEach((file) => {
-      // Validate file size (max 25MB)
-      if (file.size > 25 * 1024 * 1024) {
-        setFileError(`"${file.name}" exceeds the 25MB limit.`);
-        return;
-      }
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const result = event.target?.result as string;
-        if (result) {
-          if (file.type.startsWith('video/')) {
-            setMediaType('video');
-            setMediaUrls([result]);
-            if (activeTab === 'reel') setReelVideoUrl(result);
-            if (activeTab === 'story') {
-              setStoryMedia(result);
-              setStoryMediaType('video');
-            }
-          } else {
-            setMediaType('image');
-            setMediaUrls((prev) => [...prev, result]);
-            if (activeTab === 'story') {
-              setStoryMedia(result);
-              setStoryMediaType('image');
-            }
+  const uploadSelectedFiles = async (filesToUpload: File[]) => {
+    if (filesToUpload.length === 0) return;
+    setFileError(null);
+    setFailedFiles([]);
+    setIsUploadingMedia(true);
+    setUploadProgress(5);
+
+    const userId = currentUser?.id || 'owner';
+    try {
+      for (let i = 0; i < filesToUpload.length; i++) {
+        const file = filesToUpload[i];
+        if (file.size > 50 * 1024 * 1024) {
+          throw new Error(`"${file.name}" exceeds the 50MB limit.`);
+        }
+        const downloadUrl = await uploadPostMediaFile(
+          file,
+          userId,
+          file.name || `media_${Date.now()}`,
+          (pct) => {
+            const overall = Math.round(((i * 100 + pct) / filesToUpload.length));
+            setUploadProgress(Math.min(100, overall));
+          }
+        );
+        if (file.type.startsWith('video/')) {
+          setMediaType('video');
+          setMediaUrls([downloadUrl]);
+          if (activeTab === 'reel') setReelVideoUrl(downloadUrl);
+          if (activeTab === 'story') {
+            setStoryMedia(downloadUrl);
+            setStoryMediaType('video');
+          }
+        } else {
+          setMediaType('image');
+          setMediaUrls((prev) => [...prev, downloadUrl]);
+          if (activeTab === 'story') {
+            setStoryMedia(downloadUrl);
+            setStoryMediaType('image');
           }
         }
-      };
-      reader.readAsDataURL(file);
-    });
+      }
+      setUploadProgress(100);
+    } catch (err: any) {
+      console.error('Media upload error:', err);
+      setFileError(err?.message || 'Failed to upload media file.');
+      setFailedFiles(filesToUpload);
+    } finally {
+      setIsUploadingMedia(false);
+    }
+  };
+
+  // Handle local Gallery / File Picker
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const selected = Array.from(files);
     e.target.value = '';
+    await uploadSelectedFiles(selected);
   };
 
   // Handle media captured by camera
-  const handleCameraCaptured = (url: string, type: 'image' | 'video') => {
+  const handleCameraCaptured = async (url: string, type: 'image' | 'video') => {
+    setFileError(null);
+    let finalUrl = url;
+    if (url.startsWith('data:') || url.startsWith('blob:')) {
+      setIsUploadingMedia(true);
+      setUploadProgress(15);
+      try {
+        const resp = await fetch(url);
+        const blob = await resp.blob();
+        const ext = type === 'video' ? 'webm' : 'jpg';
+        finalUrl = await uploadPostMediaFile(
+          blob,
+          currentUser?.id || 'owner',
+          `camera_${Date.now()}.${ext}`,
+          (pct) => setUploadProgress(pct)
+        );
+      } catch (err: any) {
+        setFileError(err?.message || 'Failed to upload camera media');
+      } finally {
+        setIsUploadingMedia(false);
+      }
+    }
     setMediaType(type);
-    setMediaUrls([url]);
+    setMediaUrls([finalUrl]);
     if (activeTab === 'reel') {
-      setReelVideoUrl(url);
+      setReelVideoUrl(finalUrl);
     } else if (activeTab === 'story') {
-      setStoryMedia(url);
+      setStoryMedia(finalUrl);
       setStoryMediaType(type);
     }
   };
@@ -310,12 +356,38 @@ export const CreatePostModal: React.FC = () => {
             className="hidden"
           />
 
+          {isUploadingMedia && (
+            <div className="mx-5 mt-3 px-3.5 py-2.5 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-600 dark:text-indigo-400 text-xs flex items-center justify-between gap-3">
+              <span className="flex items-center gap-2 font-semibold">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Uploading media... {uploadProgress}%
+              </span>
+              <div className="w-28 h-1.5 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-rose-500 transition-all duration-200"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           {fileError && (
-            <div className="mx-5 mt-3 px-3.5 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs flex items-center justify-between">
+            <div className="mx-5 mt-3 px-3.5 py-2 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-600 dark:text-rose-400 text-xs flex items-center justify-between gap-2">
               <span>{fileError}</span>
-              <button type="button" onClick={() => setFileError(null)} className="p-0.5 hover:opacity-75">
-                <X className="w-3.5 h-3.5" />
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {failedFiles.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => uploadSelectedFiles(failedFiles)}
+                    className="px-2 py-0.5 rounded-md bg-rose-500 text-white font-bold"
+                  >
+                    Retry
+                  </button>
+                )}
+                <button type="button" onClick={() => setFileError(null)} className="p-0.5 hover:opacity-75">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           )}
 

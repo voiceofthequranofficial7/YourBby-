@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useApp } from '../../context/AppContext.tsx';
-import { compressImageDataUrl, uploadCoverPhotoFile } from '../../firebase/config.ts';
+import { uploadProfilePhotoFile, uploadCoverPhotoFile } from '../../firebase/config.ts';
 import {
   User,
   Camera,
@@ -81,11 +81,18 @@ export const OwnerProfileSetupModal: React.FC<OwnerProfileSetupModalProps> = ({
 
   const handleAvatarFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    e.target.value = '';
+    if (!file || !currentUser) return;
+    setErrorMessage(null);
+    setIsSaving(true);
     try {
-      const compressed = await compressImageDataUrl(file, 320, 320, 110000);
-      if (compressed) setAvatarPreview(compressed);
-    } catch (_) {}
+      const downloadUrl = await uploadProfilePhotoFile(file, currentUser.id, file.name);
+      setAvatarPreview(downloadUrl);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'Failed to upload profile photo');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleCoverFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -104,9 +111,28 @@ export const OwnerProfileSetupModal: React.FC<OwnerProfileSetupModalProps> = ({
     }
   };
 
-  const handleCameraCapture = (mediaUrl: string) => {
-    setAvatarPreview(mediaUrl);
+  const handleCameraCapture = async (mediaUrl: string) => {
     setIsCameraOpen(false);
+    if (!currentUser) {
+      setAvatarPreview(mediaUrl);
+      return;
+    }
+    if (mediaUrl.startsWith('data:image/')) {
+      setIsSaving(true);
+      setErrorMessage(null);
+      try {
+        const res = await fetch(mediaUrl);
+        const blob = await res.blob();
+        const downloadUrl = await uploadProfilePhotoFile(blob, currentUser.id, `camera_${Date.now()}.jpg`);
+        setAvatarPreview(downloadUrl);
+      } catch (err: any) {
+        setErrorMessage(err?.message || 'Failed to upload captured photo');
+      } finally {
+        setIsSaving(false);
+      }
+    } else {
+      setAvatarPreview(mediaUrl);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {

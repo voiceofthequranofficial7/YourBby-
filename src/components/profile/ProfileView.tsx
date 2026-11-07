@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { db, compressImageDataUrl } from '../../firebase/config.ts';
+import { db, uploadProfilePhotoFile } from '../../firebase/config.ts';
 import { useApp } from '../../context/AppContext.tsx';
 import { apiFetch } from '../../firebase/staticApiFallback.ts';
 import type { User } from '../../types/index.ts';
@@ -177,18 +177,46 @@ export const ProfileView: React.FC = () => {
 
   const totalVideosCount = userReels.length + userVideoPosts.length;
 
-  // Direct Avatar change (strictly updates only avatar, never coverPhotoURL)
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUploadProgress, setAvatarUploadProgress] = useState(0);
+  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
+  const [pendingAvatarFile, setPendingAvatarFile] = useState<File | null>(null);
+
+  const performAvatarUpload = async (file: File) => {
+    if (!currentUser) return;
+    setAvatarUploading(true);
+    setAvatarUploadProgress(5);
+    setAvatarUploadError(null);
+    setPendingAvatarFile(file);
+    try {
+      const downloadUrl = await uploadProfilePhotoFile(
+        file,
+        currentUser.id,
+        file.name || 'avatar.jpg',
+        (pct) => setAvatarUploadProgress(pct)
+      );
+      await updateCurrentUserProfile({ avatar: downloadUrl });
+      setPendingAvatarFile(null);
+      setReportFeedback('Profile picture uploaded and saved!');
+      setTimeout(() => setReportFeedback(null), 4000);
+    } catch (err: any) {
+      console.error('Avatar upload error:', err);
+      setAvatarUploadError(err?.message || 'Failed to upload profile photo.');
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
+
+  // Direct Avatar change (strictly updates only avatar via dedicated profile photo storage path, never coverPhotoURL)
   const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    try {
-      const compressed = await compressImageDataUrl(file, 320, 320, 110000);
-      if (compressed) {
-        await updateCurrentUserProfile({ avatar: compressed });
-      }
-    } catch (err) {
-      console.error('Avatar upload error:', err);
+    if (!file.type.startsWith('image/')) {
+      setAvatarUploadError('Please select a valid image file (JPG, PNG, or WebP).');
+      return;
     }
+    await performAvatarUpload(file);
+    e.target.value = '';
   };
 
   const handleReportUser = () => {
@@ -206,6 +234,41 @@ export const ProfileView: React.FC = () => {
         onChange={handleAvatarFileChange}
         className="hidden"
       />
+
+      {/* Avatar upload progress / error banner */}
+      {avatarUploading && (
+        <div className="p-3 bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 rounded-2xl text-xs font-semibold flex items-center justify-between gap-3">
+          <span>Uploading profile photo... {avatarUploadProgress}%</span>
+          <div className="w-32 h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden">
+            <div
+              className="h-full bg-rose-500 transition-all duration-200"
+              style={{ width: `${avatarUploadProgress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {avatarUploadError && (
+        <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 rounded-2xl text-xs font-semibold flex items-center justify-between gap-2">
+          <span>{avatarUploadError}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            {pendingAvatarFile && (
+              <button
+                onClick={() => performAvatarUpload(pendingAvatarFile)}
+                className="px-2.5 py-1 rounded-lg bg-rose-500 text-white font-bold"
+              >
+                Retry
+              </button>
+            )}
+            <button
+              onClick={() => setAvatarUploadError(null)}
+              className="px-2 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-300"
+            >
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Feedback alert */}
       {reportFeedback && (

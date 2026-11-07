@@ -47,6 +47,8 @@ export const SettingsView: React.FC = () => {
     blockedUserIds,
     toggleBlockUser,
     setIsAuthModalOpen,
+    logoutUserAccount,
+    changeUserPassword,
     setActiveTab,
     setViewingProfileUsername
   } = useApp();
@@ -58,35 +60,48 @@ export const SettingsView: React.FC = () => {
   const [location, setLocation] = useState(currentUser?.location || '');
   const [website, setWebsite] = useState(currentUser?.website || '');
 
+  // Change Password state
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmNewPassword, setConfirmNewPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+
   // Privacy & Security state
   const [accountPrivacy, setAccountPrivacy] = useState<'public' | 'followers_only' | 'private'>(
     currentUser?.privacy || 'public'
   );
-  const [twoFactorAuth, setTwoFactorAuth] = useState(true);
-  const [loginAlerts, setLoginAlerts] = useState(true);
-  const [showOnlineStatus, setShowOnlineStatus] = useState(true);
+  const [twoFactorAuth, setTwoFactorAuth] = useState(currentUser?.settings?.twoFactorAuth ?? true);
+  const [loginAlerts, setLoginAlerts] = useState(currentUser?.settings?.loginAlerts ?? true);
+  const [showOnlineStatus, setShowOnlineStatus] = useState(currentUser?.settings?.showOnlineStatus ?? true);
 
   // Notifications state
-  const [pushNotifs, setPushNotifs] = useState(true);
-  const [messageAlerts, setMessageAlerts] = useState(true);
-  const [storyReactionAlerts, setStoryReactionAlerts] = useState(true);
-  const [emailDigest, setEmailDigest] = useState(false);
+  const [pushNotifs, setPushNotifs] = useState(currentUser?.settings?.pushNotifs ?? true);
+  const [messageAlerts, setMessageAlerts] = useState(currentUser?.settings?.messageAlerts ?? true);
+  const [storyReactionAlerts, setStoryReactionAlerts] = useState(currentUser?.settings?.storyReactionAlerts ?? true);
+  const [emailDigest, setEmailDigest] = useState(currentUser?.settings?.emailDigest ?? false);
 
   // Messages & Calls state
-  const [readReceipts, setReadReceipts] = useState(true);
-  const [typingIndicators, setTypingIndicators] = useState(true);
-  const [callPermissionWho, setCallPermissionWho] = useState<'everyone' | 'following' | 'nobody'>('everyone');
+  const [readReceipts, setReadReceipts] = useState(currentUser?.settings?.readReceipts ?? true);
+  const [typingIndicators, setTypingIndicators] = useState(currentUser?.settings?.typingIndicators ?? true);
+  const [callPermissionWho, setCallPermissionWho] = useState<'everyone' | 'following' | 'nobody'>(
+    currentUser?.settings?.callPermissionWho || 'everyone'
+  );
   const [deviceDiagnosticMsg, setDeviceDiagnosticMsg] = useState<string | null>(null);
 
   // Audience & Story Privacy state
-  const [defaultPostAudience, setDefaultPostAudience] = useState<'public' | 'followers' | 'friends'>('public');
-  const [defaultStoryPrivacy, setDefaultStoryPrivacy] = useState<'public' | 'friends' | 'close_friends'>('public');
-  const [allowStorySharing, setAllowStorySharing] = useState(true);
+  const [defaultPostAudience, setDefaultPostAudience] = useState<'public' | 'followers' | 'friends'>(
+    currentUser?.settings?.defaultPostAudience || 'public'
+  );
+  const [defaultStoryPrivacy, setDefaultStoryPrivacy] = useState<'public' | 'friends' | 'close_friends'>(
+    currentUser?.settings?.defaultStoryPrivacy || 'public'
+  );
+  const [allowStorySharing, setAllowStorySharing] = useState(currentUser?.settings?.allowStorySharing ?? true);
 
   // Accessibility state
-  const [textScale, setTextScale] = useState<'default' | 'large'>('default');
-  const [reduceMotion, setReduceMotion] = useState(false);
-  const [autoPlayVideos, setAutoPlayVideos] = useState(true);
+  const [textScale, setTextScale] = useState<'default' | 'large'>(currentUser?.settings?.textScale || 'default');
+  const [reduceMotion, setReduceMotion] = useState(currentUser?.settings?.reduceMotion ?? false);
+  const [autoPlayVideos, setAutoPlayVideos] = useState(currentUser?.settings?.autoPlayVideos ?? true);
 
   // Help & Support state
   const [supportSubject, setSupportSubject] = useState('');
@@ -103,12 +118,56 @@ export const SettingsView: React.FC = () => {
       setLocation(currentUser.location || '');
       setWebsite(currentUser.website || '');
       setAccountPrivacy(currentUser.privacy || 'public');
+      if (currentUser.settings) {
+        setTwoFactorAuth(currentUser.settings.twoFactorAuth ?? true);
+        setLoginAlerts(currentUser.settings.loginAlerts ?? true);
+        setShowOnlineStatus(currentUser.settings.showOnlineStatus ?? true);
+        setPushNotifs(currentUser.settings.pushNotifs ?? true);
+        setMessageAlerts(currentUser.settings.messageAlerts ?? true);
+        setStoryReactionAlerts(currentUser.settings.storyReactionAlerts ?? true);
+        setEmailDigest(currentUser.settings.emailDigest ?? false);
+        setReadReceipts(currentUser.settings.readReceipts ?? true);
+        setTypingIndicators(currentUser.settings.typingIndicators ?? true);
+        setCallPermissionWho(currentUser.settings.callPermissionWho || 'everyone');
+        setDefaultPostAudience(currentUser.settings.defaultPostAudience || 'public');
+        setDefaultStoryPrivacy(currentUser.settings.defaultStoryPrivacy || 'public');
+        setAllowStorySharing(currentUser.settings.allowStorySharing ?? true);
+        setTextScale(currentUser.settings.textScale || 'default');
+        setReduceMotion(currentUser.settings.reduceMotion ?? false);
+        setAutoPlayVideos(currentUser.settings.autoPlayVideos ?? true);
+      }
     }
   }, [currentUser]);
 
   const showSavedToast = (msg: string) => {
     setFeedbackBanner(msg);
     setTimeout(() => setFeedbackBanner(null), 3500);
+  };
+
+  const persistUserSettings = async (overrides: Record<string, any> = {}) => {
+    const nextSettings = {
+      twoFactorAuth,
+      loginAlerts,
+      showOnlineStatus,
+      pushNotifs,
+      messageAlerts,
+      storyReactionAlerts,
+      emailDigest,
+      readReceipts,
+      typingIndicators,
+      callPermissionWho,
+      defaultPostAudience,
+      defaultStoryPrivacy,
+      allowStorySharing,
+      textScale,
+      reduceMotion,
+      autoPlayVideos,
+      ...overrides
+    };
+    await updateCurrentUserProfile({
+      privacy: overrides.privacy ?? accountPrivacy,
+      settings: nextSettings
+    });
   };
 
   const handleSaveAccountProfile = async (e: React.FormEvent) => {
@@ -125,8 +184,33 @@ export const SettingsView: React.FC = () => {
   };
 
   const handleSavePrivacy = async () => {
-    await updateCurrentUserProfile({ privacy: accountPrivacy });
-    showSavedToast('Privacy and security settings saved.');
+    await persistUserSettings({ privacy: accountPrivacy });
+    showSavedToast('Privacy and security settings saved to your account.');
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordError(null);
+    if (!newPassword || newPassword.length < 6) {
+      setPasswordError('New password must be at least 6 characters.');
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordError('New password and confirmation do not match.');
+      return;
+    }
+    setIsChangingPassword(true);
+    try {
+      await changeUserPassword(currentPassword, newPassword);
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmNewPassword('');
+      showSavedToast('Password updated successfully.');
+    } catch (err: any) {
+      setPasswordError(err?.message || 'Could not update password.');
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   const handleTestHardware = async (kind: 'camera' | 'microphone') => {
@@ -242,9 +326,22 @@ export const SettingsView: React.FC = () => {
             );
           })}
 
-          <div className="pt-2 mt-2 border-t border-slate-100 dark:border-slate-800">
+          <div className="pt-2 mt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
             <button
               onClick={() => setIsAuthModalOpen(true)}
+              className="w-full flex items-center justify-between px-3 py-2.5 rounded-2xl text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors"
+            >
+              <span className="flex items-center gap-2.5">
+                <User className="w-4 h-4 text-indigo-500" />
+                <span>Switch Account</span>
+              </span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
+            </button>
+            <button
+              onClick={async () => {
+                await logoutUserAccount();
+                showSavedToast('Logged out of your account.');
+              }}
               className="w-full flex items-center justify-between px-3 py-2.5 rounded-2xl text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition-colors"
             >
               <span className="flex items-center gap-2.5">
@@ -354,7 +451,7 @@ export const SettingsView: React.FC = () => {
                   Privacy and Security
                 </h2>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  Control who can view your profile and safeguard your account with 2FA.
+                  Control who can view your profile, change your password, and safeguard your account.
                 </p>
               </div>
 
@@ -378,19 +475,22 @@ export const SettingsView: React.FC = () => {
                   title: 'Two-Factor Authentication (2FA)',
                   desc: 'Require a verification code when signing in from unrecognized devices.',
                   val: twoFactorAuth,
-                  setVal: setTwoFactorAuth
+                  setVal: setTwoFactorAuth,
+                  key: 'twoFactorAuth'
                 },
                 {
                   title: 'Unrecognized Login Alerts',
                   desc: 'Receive instant alerts if someone signs into your account.',
                   val: loginAlerts,
-                  setVal: setLoginAlerts
+                  setVal: setLoginAlerts,
+                  key: 'loginAlerts'
                 },
                 {
                   title: 'Active Online Status',
                   desc: 'Show when you are active or recently active in Messages.',
                   val: showOnlineStatus,
-                  setVal: setShowOnlineStatus
+                  setVal: setShowOnlineStatus,
+                  key: 'showOnlineStatus'
                 }
               ].map((item, idx) => (
                 <div
@@ -403,7 +503,11 @@ export const SettingsView: React.FC = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => item.setVal(!item.val)}
+                    onClick={() => {
+                      const next = !item.val;
+                      item.setVal(next);
+                      persistUserSettings({ [item.key]: next });
+                    }}
                     className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${
                       item.val ? 'bg-rose-500' : 'bg-slate-300 dark:bg-slate-700'
                     }`}
@@ -425,6 +529,52 @@ export const SettingsView: React.FC = () => {
                   Save Privacy Settings
                 </button>
               </div>
+
+              {/* Change Password Form */}
+              <form
+                onSubmit={handleChangePassword}
+                className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-700/60 space-y-3 pt-4"
+              >
+                <h3 className="text-xs font-extrabold text-slate-900 dark:text-white flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-rose-500" />
+                  <span>Change Account Password</span>
+                </h3>
+                {passwordError && (
+                  <p className="text-xs font-semibold text-rose-500">{passwordError}</p>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                  <input
+                    type="password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Current password"
+                    className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+                  />
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="New password (min 6 chars)"
+                    className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+                  />
+                  <input
+                    type="password"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                    className="px-3 py-2 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700"
+                  />
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={isChangingPassword}
+                    className="px-4 py-2 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-bold"
+                  >
+                    {isChangingPassword ? 'Updating...' : 'Update Password'}
+                  </button>
+                </div>
+              </form>
             </div>
           )}
 
@@ -456,25 +606,29 @@ export const SettingsView: React.FC = () => {
                   title: 'Push Notifications',
                   desc: 'Receive native browser and mobile notifications.',
                   val: pushNotifs,
-                  setVal: setPushNotifs
+                  setVal: setPushNotifs,
+                  key: 'pushNotifs'
                 },
                 {
                   title: 'Direct Messages & Calls',
                   desc: 'Alerts for incoming messages, voice notes, and audio/video calls.',
                   val: messageAlerts,
-                  setVal: setMessageAlerts
+                  setVal: setMessageAlerts,
+                  key: 'messageAlerts'
                 },
                 {
                   title: 'Story Views & Reactions',
                   desc: 'Notify when someone reacts or replies to your 24-hour story.',
                   val: storyReactionAlerts,
-                  setVal: setStoryReactionAlerts
+                  setVal: setStoryReactionAlerts,
+                  key: 'storyReactionAlerts'
                 },
                 {
                   title: 'Weekly Community Digest',
                   desc: 'Summary of top posts from people you follow.',
                   val: emailDigest,
-                  setVal: setEmailDigest
+                  setVal: setEmailDigest,
+                  key: 'emailDigest'
                 }
               ].map((item, idx) => (
                 <div
@@ -487,9 +641,11 @@ export const SettingsView: React.FC = () => {
                   </div>
                   <button
                     type="button"
-                    onClick={() => {
-                      item.setVal(!item.val);
-                      showSavedToast('Notification preference updated.');
+                    onClick={async () => {
+                      const next = !item.val;
+                      item.setVal(next);
+                      await persistUserSettings({ [item.key]: next });
+                      showSavedToast('Notification preference saved to your profile.');
                     }}
                     className={`w-11 h-6 rounded-full transition-colors relative shrink-0 ${
                       item.val ? 'bg-rose-500' : 'bg-slate-300 dark:bg-slate-700'

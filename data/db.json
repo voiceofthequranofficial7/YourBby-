@@ -16,7 +16,7 @@
     "isOnline": true,
     "badge": "Founder & Owner",
     "privacy": "public",
-    "lastSeen": "2026-11-06T15:34:31.422Z",
+    "lastSeen": "2026-11-07T03:21:59.252Z",
     "coverPhotoURL": ""
   },
   "usersList": [
@@ -37,7 +37,7 @@
       "isOnline": true,
       "badge": "Founder & Owner",
       "privacy": "public",
-      "lastSeen": "2026-11-06T15:34:31.422Z",
+      "lastSeen": "2026-11-07T03:21:59.252Z",
       "coverPhotoURL": ""
     },
     {
@@ -112,7 +112,113 @@
       ]
     }
   ],
-  "commentsMap": {},
+  "commentsMap": {
+    "p_1794021490944": [],
+    "p_1794021570312": [
+      {
+        "id": "c_1794021570364_7pd",
+        "postId": "p_1794021570312",
+        "authorId": "u_1794021570265",
+        "author": {
+          "id": "u_1794021570265",
+          "username": "phase1_usera_70182_upd",
+          "displayName": "User A Verified",
+          "email": "phase1_usera_70182@yourbby.test",
+          "avatar": "/api/media/avatars/avatar_u_1794021570265_1794021570291.png",
+          "coverPhotoURL": "/api/media/covers/cover_u_1794021570265_1794021570301.png",
+          "coverPhoto": "/api/media/covers/cover_u_1794021570265_1794021570301.png",
+          "bio": "Updated Phase 1 Bio",
+          "location": "Kolkata, India",
+          "website": "",
+          "verified": false,
+          "role": "user",
+          "followersCount": 0,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "lastSeen": "2026-11-07T03:19:30.364Z",
+          "privacy": "public",
+          "settings": {
+            "pushNotifs": true,
+            "emailDigest": true,
+            "showOnlineStatus": false
+          }
+        },
+        "text": "Permanent comment by User A",
+        "createdAt": "2026-11-07T03:19:30.364Z",
+        "likesCount": 0,
+        "hasLiked": false,
+        "replies": []
+      }
+    ],
+    "p_1794021647914": [
+      {
+        "id": "c_1794021647953_b72",
+        "postId": "p_1794021647914",
+        "authorId": "u_1794021647873",
+        "author": {
+          "id": "u_1794021647873",
+          "username": "phase1_usera_47796_upd",
+          "displayName": "User A Verified",
+          "email": "phase1_usera_47796@yourbby.test",
+          "avatar": "/api/media/avatars/avatar_u_1794021647873_1794021647898.png",
+          "coverPhotoURL": "/api/media/covers/cover_u_1794021647873_1794021647906.png",
+          "coverPhoto": "/api/media/covers/cover_u_1794021647873_1794021647906.png",
+          "bio": "Updated Phase 1 Bio",
+          "location": "Kolkata, India",
+          "website": "",
+          "verified": false,
+          "role": "user",
+          "followersCount": 0,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "lastSeen": "2026-11-07T03:20:47.953Z",
+          "privacy": "public",
+          "settings": {
+            "pushNotifs": true,
+            "emailDigest": true,
+            "showOnlineStatus": false
+          }
+        },
+        "text": "Permanent comment by User A",
+        "createdAt": "2026-11-07T03:20:47.953Z",
+        "likesCount": 0,
+        "hasLiked": false,
+        "replies": []
+      },
+      {
+        "id": "c_1794021647983_krs",
+        "postId": "p_1794021647914",
+        "authorId": "u_1794021647970",
+        "author": {
+          "id": "u_1794021647970",
+          "username": "phase1_userb_47796",
+          "displayName": "User B Explorer",
+          "email": "phase1_userb_47796@yourbby.test",
+          "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%236366f1\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">UB</text></svg>",
+          "coverPhotoURL": "",
+          "coverPhoto": "",
+          "bio": "Hacked by User B",
+          "location": "",
+          "website": "",
+          "verified": false,
+          "role": "user",
+          "followersCount": 0,
+          "followingCount": 0,
+          "friendsCount": 0,
+          "isOnline": true,
+          "lastSeen": "2026-11-07T03:20:47.990Z",
+          "privacy": "public"
+        },
+        "text": "Hello from User B!",
+        "createdAt": "2026-11-07T03:20:47.983Z",
+        "likesCount": 0,
+        "hasLiked": false,
+        "replies": []
+      }
+    ]
+  },
   "storiesList": [],
   "reelsList": [],
   "notesList": [],
@@ -421,6 +527,122 @@
   },
   "notificationsList": [
     {
+      "id": "notif_comment_1794021719225_51j",
+      "recipientId": "u_1794021719069",
+      "type": "comment",
+      "actor": {
+        "id": "u_1794021719200",
+        "username": "phase1_userb_18974",
+        "displayName": "User B Explorer",
+        "email": "phase1_userb_18974@yourbby.test",
+        "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%236366f1\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">UB</text></svg>",
+        "coverPhotoURL": "",
+        "coverPhoto": "",
+        "bio": "",
+        "location": "",
+        "website": "",
+        "verified": false,
+        "role": "user",
+        "followersCount": 0,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "lastSeen": "2026-11-07T03:21:59.225Z",
+        "privacy": "public"
+      },
+      "postId": "p_1794021719134",
+      "text": "commented on your post: \"Hello from User B!\"",
+      "createdAt": "2026-11-07T03:21:59.225Z",
+      "read": false
+    },
+    {
+      "id": "notif_react_1794021719221_89m",
+      "recipientId": "u_1794021719069",
+      "type": "like",
+      "actor": {
+        "id": "u_1794021719200",
+        "username": "phase1_userb_18974",
+        "displayName": "User B Explorer",
+        "email": "phase1_userb_18974@yourbby.test",
+        "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%236366f1\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">UB</text></svg>",
+        "coverPhotoURL": "",
+        "coverPhoto": "",
+        "bio": "",
+        "location": "",
+        "website": "",
+        "verified": false,
+        "role": "user",
+        "followersCount": 0,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "lastSeen": "2026-11-07T03:21:59.221Z",
+        "privacy": "public"
+      },
+      "postId": "p_1794021719134",
+      "text": "reacted (like) to your post: \"Hello YourBby Phase 1 Text Post (Edi\"",
+      "createdAt": "2026-11-07T03:21:59.221Z",
+      "read": false
+    },
+    {
+      "id": "notif_comment_1794021647983_k54",
+      "recipientId": "u_1794021647873",
+      "type": "comment",
+      "actor": {
+        "id": "u_1794021647970",
+        "username": "phase1_userb_47796",
+        "displayName": "User B Explorer",
+        "email": "phase1_userb_47796@yourbby.test",
+        "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%236366f1\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">UB</text></svg>",
+        "coverPhotoURL": "",
+        "coverPhoto": "",
+        "bio": "",
+        "location": "",
+        "website": "",
+        "verified": false,
+        "role": "user",
+        "followersCount": 0,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "lastSeen": "2026-11-07T03:20:47.983Z",
+        "privacy": "public"
+      },
+      "postId": "p_1794021647914",
+      "text": "commented on your post: \"Hello from User B!\"",
+      "createdAt": "2026-11-07T03:20:47.983Z",
+      "read": false
+    },
+    {
+      "id": "notif_react_1794021647980_j6c",
+      "recipientId": "u_1794021647873",
+      "type": "like",
+      "actor": {
+        "id": "u_1794021647970",
+        "username": "phase1_userb_47796",
+        "displayName": "User B Explorer",
+        "email": "phase1_userb_47796@yourbby.test",
+        "avatar": "data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\"><rect width=\"200\" height=\"200\" fill=\"%230f172a\"/><circle cx=\"100\" cy=\"100\" r=\"76\" fill=\"%231e293b\" stroke=\"%236366f1\" stroke-width=\"4\"/><text x=\"100\" y=\"118\" font-family=\"system-ui,sans-serif\" font-size=\"64\" font-weight=\"bold\" fill=\"%23ffffff\" text-anchor=\"middle\">UB</text></svg>",
+        "coverPhotoURL": "",
+        "coverPhoto": "",
+        "bio": "",
+        "location": "",
+        "website": "",
+        "verified": false,
+        "role": "user",
+        "followersCount": 0,
+        "followingCount": 0,
+        "friendsCount": 0,
+        "isOnline": true,
+        "lastSeen": "2026-11-07T03:20:47.980Z",
+        "privacy": "public"
+      },
+      "postId": "p_1794021647914",
+      "text": "reacted (like) to your post: \"Hello YourBby Phase 1 Text Post (Edi\"",
+      "createdAt": "2026-11-07T03:20:47.980Z",
+      "read": false
+    },
+    {
       "id": "notif_msg_1793966701891_zf2",
       "type": "message",
       "actor": {
@@ -662,5 +884,36 @@
     ]
   },
   "contentReports": [],
-  "updatedAt": "2026-11-06T15:34:31.422Z"
+  "credentialsMap": {
+    "u_1794021392781": {
+      "email": "phase1_usera_92673@yourbby.test",
+      "password": "SecretPass123!"
+    },
+    "u_1794021490889": {
+      "email": "phase1_usera_90792@yourbby.test",
+      "password": "SecretPass123!"
+    },
+    "u_1794021570265": {
+      "email": "phase1_usera_70182@yourbby.test",
+      "password": "SecretPass123!"
+    },
+    "u_1794021647873": {
+      "email": "phase1_usera_47796@yourbby.test",
+      "password": "UpdatedPass456!"
+    },
+    "u_1794021647970": {
+      "email": "phase1_userb_47796@yourbby.test",
+      "password": "UserBPass123!"
+    },
+    "u_1794021719069": {
+      "email": "phase1_usera_18974@yourbby.test",
+      "password": "UpdatedPass456!"
+    },
+    "u_1794021719200": {
+      "email": "phase1_userb_18974@yourbby.test",
+      "password": "UserBPass123!"
+    }
+  },
+  "updatedAt": "2026-11-07T03:21:59.252Z",
+  "currentUserId": "u_owner_mohammad_siraj"
 }
